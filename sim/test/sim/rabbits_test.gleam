@@ -290,3 +290,34 @@ pub fn a_rabbit_stays_set_on_going_home_once_it_decides_test() {
   let assert [later] = run_home([r], far_away, door, 120)
   assert later.shelter == rabbits.GoingHome
 }
+
+pub fn calm_rabbits_do_not_walk_into_a_spider_between_them_test() {
+  // Two rabbits want to huddle, but a spider sits between them.
+  let spider = Vec3(300.0, 0.0, 0.0)
+  let start = [
+    rabbit_at(0, Vec3(-200.0, 0.0, 0.0), 0.0),
+    rabbit_at(1, Vec3(800.0, 0.0, 0.0), 0.0),
+  ]
+  let #(_, ok) =
+    list.fold(list.repeat(Nil, 900), #(start, True), fn(acc, _) {
+      let #(herd, ok) = acc
+      let next = run(herd, spider, 1)
+      #(next, ok && !list.any(next, rabbits.is_fleeing))
+    })
+  assert ok
+}
+
+pub fn a_fleeing_rabbit_runs_along_a_wall_instead_of_into_it_test() {
+  // A spider comes from the right, and a wall is just left of the rabbit.
+  let tight = Bounds(-100.0, 1000.0, -1000.0, 1000.0)
+  let rabbit = rabbit_at(0, Vec3(0.0, 0.0, 0.0), 1.0)
+  let spider = Vec3(150.0, 0.0, 0.0)
+  let after =
+    list.fold(list.repeat(Nil, 60), [rabbit], fn(herd, _) {
+      rabbits.step(herd, from: spider, within: tight, dt: dt, config: config())
+    })
+  let assert [r] = after
+  // It got away along the wall rather than sitting pinned against it.
+  assert vec3.ground_distance(r.position, spider) >. 250.0
+  assert float.absolute_value(r.position.z) >. 150.0
+}

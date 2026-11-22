@@ -96,6 +96,10 @@ const door_reach = 18.0
 /// door.
 const all_clear = 1.3
 
+/// A calm rabbit starts to keep away from a spider this many fear radii out,
+/// so it steers around spiders instead of walking into their range.
+const wary = 1.2
+
 /// `count` rabbits on a sunflower spiral of radius `spread` around `center`.
 pub fn herd(
   count: Int,
@@ -293,6 +297,7 @@ fn step_one(
       |> vec3.add(vec3.scale(vec3.from_yaw(own_angle(rabbit)), 0.35))
       |> vec3.add(vec3.scale(separation, 1.5))
       |> vec3.normalize
+      |> steer(rabbit, _, ground, spiders, bounds, config)
       |> vec3.scale(config.run_speed *. fear)
     _, _, False -> {
       let to_group = vec3.flat(vec3.subtract(group, rabbit.position))
@@ -307,10 +312,12 @@ fn step_one(
         terrain.route(ground, from: rabbit.position, to: group)
         |> vec3.subtract(rabbit.position)
         |> vec3.flat
-      vec3.add(
-        vec3.scale(vec3.normalize(way), config.walk_speed *. pull),
-        vec3.scale(separation, config.walk_speed *. 1.5),
-      )
+      vec3.scale(vec3.normalize(way), config.walk_speed *. pull)
+      |> vec3.add(vec3.scale(separation, config.walk_speed *. 1.5))
+      |> vec3.add(vec3.scale(
+        keep_away(rabbit, spiders, config),
+        config.walk_speed *. 3.0,
+      ))
     }
   }
 
@@ -376,6 +383,91 @@ fn step_one(
         shelter:,
       )
   }
+}
+
+/// Directions a fleeing rabbit weighs each frame.
+const choices = 16
+
+/// How far ahead a fleeing rabbit looks along each direction.
+const look_ahead = 150.0
+
+/// The clear direction that best matches `wanted`. A direction loses points
+/// when it runs into a screen edge, a rock, a hill or the crevasse within
+/// `look_ahead` (the sooner, the more), and when its far end is near a
+/// spider. Keeping close to the current heading avoids jitter.
+fn steer(
+  rabbit: Rabbit,
+  wanted: Vec3,
+  ground: Terrain,
+  spiders: List(Vec3),
+  bounds: Bounds,
+  config: Config,
+) -> Vec3 {
+  let current = vec3.normalize(vec3.flat(rabbit.velocity))
+  let score = fn(d: Vec3) {
+    let at = fn(k) {
+      vec3.add(
+        rabbit.position,
+        vec3.scale(d, look_ahead *. int.to_float(k) /. 3.0),
+      )
+    }
+    let hit =
+      [1, 2, 3]
+      |> list.find(fn(k) { blocked(at(k), ground, bounds) })
+    let crash = case hit {
+      Ok(k) -> int.to_float(4 - k) *. 1.5
+      Error(Nil) -> 0.0
+    }
+    let end = at(3)
+    let danger =
+      list.fold(spiders, 0.0, fn(sum, spider) {
+        let gap = vec3.ground_distance(end, spider)
+        sum +. 1.5 *. float.max(0.0, 1.0 -. gap /. config.fear_radius)
+      })
+    vec3.dot(d, wanted) +. 0.3 *. vec3.dot(d, current) -. crash -. danger
+  }
+  list.repeat(Nil, choices)
+  |> list.index_map(fn(_, i) {
+    vec3.from_yaw(int.to_float(i) *. 2.0 *. maths.pi() /. int.to_float(choices))
+  })
+  |> list.fold(#(wanted, -1000.0), fn(best, d) {
+    let s = score(d)
+    case s >. best.1 {
+      True -> #(d, s)
+      False -> best
+    }
+  })
+  |> fn(best) { best.0 }
+}
+
+/// True when `p` is too close to a screen edge, or inside a rock, a hill or
+/// the crevasse.
+fn blocked(p: Vec3, ground: Terrain, bounds: Bounds) -> Bool {
+  let edge = 20.0
+  p.x <. bounds.min_x +. edge
+  || p.x >. bounds.max_x -. edge
+  || p.z <. bounds.min_z +. edge
+  || p.z >. bounds.max_z -. edge
+  || vec3.ground_distance(p, terrain.push_out(ground, p, rock_pad)) >. 0.5
+}
+
+/// A push away from each spider inside the wary range. It is 0 at the edge
+/// of that range and grows to 1.5 at the fear radius, so a calm rabbit stops
+/// short of a spider's range, and backs off when a spider comes closer.
+fn keep_away(rabbit: Rabbit, spiders: List(Vec3), config: Config) -> Vec3 {
+  let outer = config.fear_radius *. wary
+  list.fold(spiders, vec3.zero, fn(push, spider) {
+    let away = vec3.flat(vec3.subtract(rabbit.position, spider))
+    let d = vec3.length(away)
+    case d <. outer && d >. 0.001 {
+      False -> push
+      True -> {
+        let k =
+          float.min(1.5, { outer -. d } /. { outer -. config.fear_radius })
+        vec3.add(push, vec3.scale(away, k /. d))
+      }
+    }
+  })
 }
 
 /// The way away from the spiders, weighted toward the closest ones.
