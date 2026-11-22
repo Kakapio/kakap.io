@@ -16,6 +16,24 @@ const TUNICS = [
   "#45374f",
 ];
 
+type Look = { name?: string; tunic: string; fur: string; furShade: string };
+
+/** Named rabbits by id. The rest of the herd stays anonymous. */
+const NAMED: Record<number, Partial<Look>> = {
+  0: { name: "Steph", tunic: "#d27896", fur: "#ecd58a", furShade: "#cdb269" },
+  1: { name: "Alex" },
+  2: { name: "Rishi", fur: "#9a6b45", furShade: "#7a5234" },
+};
+
+function lookOf(id: number): Look {
+  return {
+    tunic: TUNICS[id % TUNICS.length]!,
+    fur: FUR,
+    furShade: FUR_SHADE,
+    ...NAMED[id],
+  };
+}
+
 /**
  * Rabbit folk drawn as upright cut-outs that always face the screen, flipped to
  * face the way they run. All sizes are in world units, scaled by perspective.
@@ -42,7 +60,40 @@ export function rabbitLayers(
     depth: cam.project(r.position).depth,
     draw: () => drawRabbit(ctx, cam, r, time, boil),
   }));
-  return { shadows, pieces };
+  const ui = () => {
+    for (const r of herd) {
+      const name = lookOf(r.id).name;
+      if (name) drawNametag(ctx, cam, r, name);
+    }
+  };
+  return { shadows, pieces, ui };
+}
+
+/**
+ * A block-game nametag: white pixel text on a flat see-through plate, floating
+ * above the ears at a fixed screen size. Positions snap to whole pixels so the
+ * pixel font stays crisp.
+ */
+function drawNametag(
+  ctx: CanvasRenderingContext2D,
+  cam: Camera,
+  r: RabbitView,
+  name: string,
+) {
+  // The rabbit is an upright cut-out sized by `scale`, so the tag sits above it in screen space too.
+  const base = cam.project({ ...r.position, y: r.lift });
+  ctx.font = "500 14px 'Pixelify Sans', ui-monospace, monospace";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  const text = Math.round(ctx.measureText(name).width);
+  const width = text + 8;
+  const height = 18;
+  const x = Math.round(base.x - width / 2);
+  const y = Math.round(base.y - 56 * base.scale - 6 - height);
+  ctx.fillStyle = "rgba(0, 0, 0, 0.32)";
+  ctx.fillRect(x, y, width, height);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(name, x + 4, y + 14);
 }
 
 function drawRabbit(
@@ -65,6 +116,7 @@ function drawRabbit(
     boil.jitter({ x: base.x + x * face * s, y: base.y - y * s }, seed + k);
   const outline = Math.max(1, 2.2 * s);
   const airborne = r.lift > 1.5;
+  const look = lookOf(r.id);
 
   // Feet tuck under while airborne.
   for (const side of [-1, 1]) {
@@ -80,10 +132,10 @@ function drawRabbit(
   ctx.save();
   ctx.beginPath();
   ctx.ellipse(body.x, body.y, 10.5 * s, 13.5 * s, 0, 0, Math.PI * 2);
-  ctx.fillStyle = FUR;
+  ctx.fillStyle = look.fur;
   ctx.fill();
   ctx.clip();
-  ctx.fillStyle = TUNICS[r.id % TUNICS.length]!;
+  ctx.fillStyle = look.tunic;
   ctx.fillRect(body.x - 12 * s, body.y - 3 * s, 24 * s, 20 * s);
   ctx.restore();
   ctx.beginPath();
@@ -144,13 +196,13 @@ function drawRabbit(
         { ...mid, w: 7 * s },
         { ...tip, w: 2 * s },
       ],
-      k === 0 ? FUR_SHADE : FUR,
+      k === 0 ? look.furShade : look.fur,
     );
   }
 
   ctx.beginPath();
   ctx.arc(head.x, head.y, 9.5 * s, 0, Math.PI * 2);
-  ctx.fillStyle = FUR;
+  ctx.fillStyle = look.fur;
   ctx.fill();
   ctx.strokeStyle = INK.ink;
   ctx.lineWidth = outline;

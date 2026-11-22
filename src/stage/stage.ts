@@ -90,6 +90,7 @@ export class Stage {
       .forEach((p) => p.draw());
     for (const l of layers) l.overlay?.();
     this.ground.drawOverlay(ctx, cam);
+    for (const l of layers) l.ui?.();
     this.onFrame(time);
   }
 

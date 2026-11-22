@@ -10,7 +10,8 @@ export type DrawOptions = { boil: Boil; time: number; skeleton: boolean };
 export type Piece = { depth: number; draw: () => void };
 
 /** A creature split into what goes under everything, and parts to depth-sort with the scene. */
-export type Layers = { shadows: () => void; pieces: Piece[]; overlay?: () => void };
+/** `overlay` draws above the creatures, and `ui` above the vignette, like a game HUD. */
+export type Layers = { shadows: () => void; pieces: Piece[]; overlay?: () => void; ui?: () => void };
 
 const add = (a: V3, b: V3): V3 => ({
   x: a.x + b.x,
