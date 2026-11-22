@@ -54,17 +54,30 @@ export class Camera {
     };
   }
 
-  /** The ground point under a screen point, or null when the ray misses the ground. */
-  groundAt(sx: number, sy: number): V3 | null {
+  /** The ray from the camera through a screen point. `dir` is not normalized. */
+  ray(sx: number, sy: number): { origin: V3; dir: V3 } {
     const u = sx - this.width / 2;
     const v = this.height / 2 - sy;
-    const d = {
-      x: u,
-      y: v * this.up.y + this.focal * this.forward.y,
-      z: v * this.up.z + this.focal * this.forward.z,
+    return {
+      origin: this.position,
+      dir: {
+        x: u,
+        y: v * this.up.y + this.focal * this.forward.y,
+        z: v * this.up.z + this.focal * this.forward.z,
+      },
     };
-    if (d.y >= -1e-6) return null;
-    const t = -this.position.y / d.y;
-    return { x: this.position.x + d.x * t, y: 0, z: this.position.z + d.z * t };
+  }
+
+  /** The point at height `y` under a screen point, or null when the ray misses that plane. */
+  planeAt(sx: number, sy: number, y: number): V3 | null {
+    const { origin, dir } = this.ray(sx, sy);
+    if (dir.y >= -1e-6 || origin.y <= y) return null;
+    const t = (y - origin.y) / dir.y;
+    return { x: origin.x + dir.x * t, y, z: origin.z + dir.z * t };
+  }
+
+  /** The ground point under a screen point, or null when the ray misses the ground. */
+  groundAt(sx: number, sy: number): V3 | null {
+    return this.planeAt(sx, sy, 0);
   }
 }

@@ -5,9 +5,6 @@ export const INK = {
   ink: "#16120c",
   inkSoft: "#2a241a",
   bone: "#cfc3a0",
-  eye: "#5fd8ff",
-  eyeGlow: "rgba(70, 190, 255, 0.3)",
-  eyeCore: "#e8fbff",
   shadow: "rgba(20, 15, 8, 0.32)",
   legShadow: "rgba(20, 15, 8, 0.2)",
 } as const;

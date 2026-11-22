@@ -4,7 +4,8 @@ import type { LegView, SpiderView } from "./spider-sim";
 
 export const GROUP_COLOR = ["#f2c66d", "#7fd3e0"] as const;
 
-export type DrawOptions = { boil: Boil; time: number; skeleton: boolean };
+/** `eyeHue` is the eye color's hue in degrees. */
+export type DrawOptions = { boil: Boil; time: number; skeleton: boolean; eyeHue: number };
 
 /** Something drawn in depth order with the rest of the scene. Larger depth is farther away. */
 export type Piece = { depth: number; draw: () => void };
@@ -204,7 +205,8 @@ function drawAbdomen(
     f.k,
   );
 
-  // Pale chevrons down the back.
+  // Pale chevrons down the back: the eye hue at the saturation and lightness of INK.bone.
+  const chevron = `hsl(${opts.eyeHue} 33% 72%)`;
   const on = (t: number, s: number) =>
     cam.project(
       add(
@@ -218,7 +220,7 @@ function drawAbdomen(
     const pts = [on(t - 10 * f.k, -width), on(t, 0), on(t - 10 * f.k, width)].map((p, j) =>
       opts.boil.jitter(p, 230 + k * 3 + j),
     );
-    line(ctx, pts, INK.bone, Math.max(1, 2.6 * f.k * pts[1]!.scale));
+    line(ctx, pts, chevron, Math.max(1, 2.6 * f.k * pts[1]!.scale));
   }
 }
 
@@ -275,18 +277,22 @@ function drawHead(
     [0.45, -9, 1.8],
     [0.45, 9, 1.8],
   ];
+  const h = opts.eyeHue;
+  const glow = `hsl(${h} 100% 62% / 0.3)`;
+  const iris = `hsl(${h} 100% 66%)`;
+  const shine = `hsl(${h} 100% 95%)`;
   for (const [t, across, size] of eyes) {
     const r = size * k;
     const p = cam.project(at(rx * t, across * k, ry * 0.6));
-    ctx.fillStyle = INK.eyeGlow;
+    ctx.fillStyle = glow;
     ctx.beginPath();
     ctx.arc(p.x, p.y, r * 2.8 * p.scale, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = INK.eye;
+    ctx.fillStyle = iris;
     ctx.beginPath();
     ctx.arc(p.x, p.y, Math.max(0.9, r * p.scale), 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = INK.eyeCore;
+    ctx.fillStyle = shine;
     ctx.beginPath();
     ctx.arc(p.x - r * 0.3 * p.scale, p.y - r * 0.3 * p.scale, Math.max(0.4, r * 0.35 * p.scale), 0, Math.PI * 2);
     ctx.fill();

@@ -71,7 +71,7 @@ if (canvas) {
       ["legs swinging", `${swinging.length} / 8`],
       ["group", group === undefined ? "all planted" : `group ${group}`, group === undefined ? undefined : GROUP_COLOR[group]],
       ["stretched legs", String(stretched), stretched ? "#e0533d" : undefined],
-      ["target", stage.pointer.live ? "pointer" : "waypoint"],
+      ["target", stage.aim],
     ];
     stats.replaceChildren(
       ...rows.flatMap(([label, value, color]) => {

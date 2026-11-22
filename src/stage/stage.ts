@@ -5,11 +5,17 @@ import { Boil, line } from "./ink";
 import { Emotes, rabbitLayers } from "./rabbit-draw";
 import * as bunnies from "./rabbit-sim";
 import { rockLayers } from "./rock-draw";
-import { spiderLayers } from "./spider-draw";
+import { type Layers, spiderLayers } from "./spider-draw";
 import * as sim from "./spider-sim";
-import { type Land, scatterRocks } from "./terrain-sim";
+import { heightAt, type Land, pick, rockUnder, scatterRocks } from "./terrain-sim";
 
 export type Input = "window" | "canvas";
+
+/** What the first spider walks to: a clicked spot, the hovered spot, or its own waypoints. */
+export type Aim = "pin" | "pointer" | "waypoint";
+
+/** Clicks on these elements are for the page, not the scene. */
+const PAGE_CONTROLS = "a, button, input, select, textarea, summary, label, details";
 
 /** Seconds each spider spends on each waypoint when nobody is pointing. */
 const WAYPOINT_SECONDS = 7;
@@ -20,15 +26,20 @@ const RABBIT_COUNT = 6;
 type Walker = {
   settings: sim.SpiderSettings;
   cfg: sim.SpiderConfig;
+  /** The same settings with no keep-away distance, to stand right on a spot. */
+  exact: sim.SpiderConfig;
   state: sim.SpiderState;
   view: sim.SpiderView;
   target: V3;
+  eyeHue: number;
 };
 
 /**
  * The 2.5D scene: a camera over the ground, the scenery, a herd of rabbits,
- * and one or more spiders. The first spider stalks the pointer. With no
- * pointer, the spiders wander between waypoints, and take turns to stalk the
+ * and one or more spiders. The first spider walks to the spot under the
+ * pointer, marked by a ring on the ground. A click pins the spot, and the
+ * spider stays on it. A click on the pin removes it. With no pointer and no
+ * pin, the spiders wander between waypoints, and take turns to stalk the
  * rabbits' huddle.
  */
 export class Stage {
@@ -36,6 +47,7 @@ export class Stage {
   readonly boil = new Boil();
   readonly pointer = new Pointer();
   skeleton = false;
+  aim: Aim = "waypoint";
   onFrame: (time: number) => void = () => {};
 
   private readonly ctx: CanvasRenderingContext2D;
@@ -46,6 +58,8 @@ export class Stage {
   private rabbitCfg = bunnies.config(bunnies.DEFAULT_RABBITS);
   private herd: bunnies.Herd;
   private bounds: bunnies.Bounds = { minX: -1, maxX: 1, minZ: -1, maxZ: 1 };
+  private pin: V3 | null = null;
+  private hover: V3 | null = null;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -61,12 +75,16 @@ export class Stage {
     this.listen(input);
     const cam = this.camera;
     const origin: V3 = { x: 0, y: 0, z: 0 };
+    // A random first hue, then the others spread evenly around the color wheel.
+    const firstHue = Math.random() * 360;
     this.spiders = spiders.map((settings, i) => {
       const across = spiders.length === 1 ? 0.5 : 0.4 + (0.45 * i) / (spiders.length - 1);
       const at = cam.groundAt(cam.width * across, cam.height * (0.68 - 0.12 * (i % 2))) ?? origin;
       const cfg = sim.config(settings);
+      const exact = sim.config({ ...settings, keepDistance: 0 });
       const state = sim.spawn(this.land.ground, at, -Math.PI / 2, cfg);
-      return { settings, cfg, state, view: sim.view(state, cfg), target: at };
+      const eyeHue = (firstHue + (360 * i) / spiders.length) % 360;
+      return { settings, cfg, exact, state, view: sim.view(state, cfg), target: at, eyeHue };
     });
     this.fitFear();
     const nest = cam.groundAt(cam.width * 0.25, cam.height * 0.8) ?? origin;
@@ -88,6 +106,7 @@ export class Stage {
     for (const s of this.spiders) {
       s.settings = settings;
       s.cfg = sim.config(settings);
+      s.exact = sim.config({ ...settings, keepDistance: 0 });
     }
     this.fitFear();
   }
@@ -107,12 +126,13 @@ export class Stage {
 
   private frame(dt: number, time: number) {
     const cam = this.camera;
+    this.hover = this.pointer.live ? pick(this.land, cam, this.pointer.x, this.pointer.y) : null;
+    this.aim = this.pin ? "pin" : this.hover ? "pointer" : "waypoint";
     this.spiders.forEach((s, i) => {
-      s.target =
-        i === 0 && this.pointer.live
-          ? (cam.groundAt(this.pointer.x, this.pointer.y) ?? s.target)
-          : this.wanderTarget(i, time, s.target);
-      s.state = sim.walk(s.state, this.makeRoom(s), this.land.ground, dt, s.cfg);
+      const spot = i === 0 ? (this.pin ?? this.hover) : null;
+      s.target = spot ?? this.wanderTarget(i, time, s.target);
+      const cfg = spot ? s.exact : s.cfg;
+      s.state = sim.walk(s.state, spot ?? this.makeRoom(s), this.land.ground, dt, cfg);
       s.view = sim.view(s.state, s.cfg);
     });
     const threats = this.spiders.map((s) => s.view.body);
@@ -124,8 +144,11 @@ export class Stage {
     const ctx = this.ctx;
     this.ground.drawBase(ctx, cam);
     const layers = [
+      this.markLayers(),
       rockLayers(ctx, cam, this.land.rocks, this.boil),
-      ...this.spiders.map((s) => spiderLayers(ctx, cam, s.view, { boil: this.boil, time, skeleton: this.skeleton })),
+      ...this.spiders.map((s) =>
+        spiderLayers(ctx, cam, s.view, { boil: this.boil, time, skeleton: this.skeleton, eyeHue: s.eyeHue }),
+      ),
       rabbitLayers(ctx, cam, rabbits, time, this.boil, this.emotes),
     ];
     for (const l of layers) l.shadows();
@@ -207,6 +230,50 @@ export class Stage {
     return { minX: nearLeft.x, maxX: nearRight.x, minZ: nearLeft.z, maxZ: far.z };
   }
 
+  /**
+   * Rings on the ground in the first spider's eye hue: at the pin, and at the
+   * hovered spot. A ring on a rock sorts just in front of the rock, so it
+   * shows on top of it. A ring on open ground lies under everything.
+   */
+  private markLayers(): Layers {
+    const marks: { at: V3; alpha: number }[] = [];
+    if (this.pin) marks.push({ at: this.pin, alpha: 0.5 });
+    if (this.hover) marks.push({ at: this.hover, alpha: this.pin ? 0.22 : 0.4 });
+    const flat = marks.filter((m) => !rockUnder(this.land, m.at));
+    const raised = marks.filter((m) => rockUnder(this.land, m.at));
+    return {
+      shadows: () => flat.forEach((m) => this.drawMark(m.at, m.alpha)),
+      pieces: raised.map((m) => {
+        const r = rockUnder(this.land, m.at)!;
+        return {
+          depth: this.camera.project({ ...r.center, z: r.center.z + r.radius }).depth - 0.01,
+          draw: () => this.drawMark(m.at, m.alpha),
+        };
+      }),
+    };
+  }
+
+  /** A thin ring that follows the ground surface, rocks included. */
+  private drawMark(at: V3, alpha: number) {
+    const s = this.spiders[0]!;
+    const radius = s.settings.stance * 0.36;
+    const ring = Array.from({ length: 41 }, (_, k) => {
+      const a = (k / 40) * Math.PI * 2;
+      const p = { x: at.x + Math.cos(a) * radius, y: 0, z: at.z + Math.sin(a) * radius };
+      return this.camera.project({ ...p, y: heightAt(this.land, p) + 0.5 });
+    });
+    line(this.ctx, ring, `hsl(${s.eyeHue} 45% 70% / ${alpha})`, 1.25);
+  }
+
+  /** Pin the spot under a screen point, or remove the pin when the click lands on it. */
+  private click(sx: number, sy: number) {
+    const spot = pick(this.land, this.camera, sx, sy);
+    if (!spot) return;
+    const radius = this.spiders[0]!.settings.stance * 0.36;
+    const onPin = this.pin && Math.hypot(spot.x - this.pin.x, spot.z - this.pin.z) < radius;
+    this.pin = onPin ? null : spot;
+  }
+
   private drawFearRings() {
     const radius = bunnies.fearRadius(this.rabbitCfg);
     for (const { view } of this.spiders) {
@@ -228,7 +295,11 @@ export class Stage {
       window.addEventListener("pointermove", (e) => {
         if (e.pointerType === "mouse") p.set(e.clientX, e.clientY, true);
       });
-      window.addEventListener("pointerdown", (e) => p.set(e.clientX, e.clientY, false));
+      window.addEventListener("pointerdown", (e) => {
+        if (e.target instanceof Element && e.target.closest(PAGE_CONTROLS)) return;
+        p.set(e.clientX, e.clientY, e.pointerType === "mouse");
+        this.click(e.clientX, e.clientY);
+      });
       window.addEventListener("pointerout", (e) => {
         if (e.pointerType === "mouse" && e.relatedTarget === null) p.release();
       });
@@ -243,11 +314,14 @@ export class Stage {
       if (e.pointerType === "mouse" || e.buttons) {
         const { x, y } = local(e);
         p.set(x, y, true);
+        // Dragging carries the pin along.
+        if (e.buttons && this.pin) this.pin = pick(this.land, this.camera, x, y) ?? this.pin;
       }
     });
     c.addEventListener("pointerdown", (e) => {
       const { x, y } = local(e);
       p.set(x, y, true);
+      this.click(x, y);
       c.setPointerCapture(e.pointerId);
     });
     c.addEventListener("pointerup", () => p.release());
