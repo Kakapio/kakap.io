@@ -4,14 +4,14 @@ import { fromArray, toArray } from "../gleam";
 import type { Camera, V3 } from "./camera";
 
 export type Terrain = terrain.Terrain$;
-export type RockView = { center: V3; radius: number; height: number };
+/** `rock` is the rock or hill as the sim sees it. */
+export type RockView = { center: V3; radius: number; height: number; rock: terrain.Rock$ };
 /**
  * A house is a grassy hill with a wall dug into its near side. The wall meets
  * the ground `cut` in front of the hill's center, toward -z, and leans back
- * by `lean` radians. `door` is the spot just outside the wall. `rock` is the
- * hill as the sim sees it.
+ * by `lean` radians. `door` is the spot just outside the wall.
  */
-export type HouseView = RockView & { cut: number; lean: number; door: V3; index: number; rock: terrain.Rock$ };
+export type HouseView = RockView & { cut: number; lean: number; door: V3; index: number };
 
 /**
  * `rocks` are the rocks to draw. `mounds` are everything raised: the rocks and
@@ -41,6 +41,7 @@ const viewOf = (r: terrain.Rock$): RockView => {
     center: { x: vec3.Vec3$Vec3$x(c), y: 0, z: vec3.Vec3$Vec3$z(c) },
     radius: terrain.Rock$Rock$radius(r),
     height: terrain.Rock$Rock$height(r),
+    rock: r,
   };
 };
 

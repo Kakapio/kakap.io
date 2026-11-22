@@ -4,11 +4,27 @@ import sim/vec3.{Vec3}
 
 const rock = Rock(Vec3(100.0, 0.0, 50.0), 40.0, 30.0, 40.0)
 
-pub fn a_rock_is_tallest_at_its_center_test() {
+pub fn a_rock_is_tall_at_its_center_and_stays_inside_its_radius_test() {
   let ground = Terrain([rock])
-  assert terrain.height(ground, at: Vec3(100.0, 0.0, 50.0)) == 30.0
-  assert terrain.height(ground, at: Vec3(120.0, 0.0, 50.0)) <. 30.0
+  let top = terrain.height(ground, at: Vec3(100.0, 0.0, 50.0))
+  assert top >. 24.0
+  assert top <=. 30.0
+  assert terrain.height(ground, at: Vec3(136.0, 0.0, 50.0)) <. 20.0
   assert terrain.height(ground, at: Vec3(141.0, 0.0, 50.0)) == 0.0
+}
+
+pub fn a_rock_has_facets_that_cover_its_surface_test() {
+  let facets = terrain.facets(rock)
+  assert list.length(facets) == 15
+  assert list.all(facets, fn(f) { f.normal.y >. 0.0 })
+  // The surface point above (110, 60) lies under every facet and on one.
+  let y = terrain.height(Terrain([rock]), at: Vec3(110.0, 0.0, 60.0)) /. 30.0
+  let gaps =
+    list.map(facets, fn(f) {
+      f.reach -. f.normal.x *. 0.25 -. f.normal.y *. y -. f.normal.z *. 0.25
+    })
+  assert list.all(gaps, fn(g) { g >. -0.000001 })
+  assert list.any(gaps, fn(g) { g <. 0.000001 })
 }
 
 pub fn push_out_moves_a_point_past_the_edge_test() {

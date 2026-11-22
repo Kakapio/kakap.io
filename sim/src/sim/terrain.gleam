@@ -1,7 +1,8 @@
-//// Raised ground: rocks and hills. A rock is the top half of an ellipsoid: a
-//// circle of `radius` on the ground, `height` tall at its center. A rock can
-//// have its near side (toward -z) sliced off by a vertical wall `cut` from its
-//// center.
+//// Raised ground: rocks and hills. A rock is a boulder with flat facets. It
+//// fits inside the top half of an ellipsoid: a circle of `radius` on the
+//// ground, `height` tall at its center. Each rock gets its own facets from
+//// its position and size. A rock can have its near side (toward -z) sliced
+//// off by a vertical wall `cut` from its center.
 ////
 //// A hill is a mound with a gentle ripple. Its sides and back meet the ground
 //// with no edge. Its near side is steep and rounded, and a wall that leans
@@ -94,11 +95,22 @@ pub fn rock_height(rock: Rock, p: Vec3) -> Float {
 /// The height of one rock or hill at `p` as if it had no wall.
 pub fn surface(rock: Rock, p: Vec3) -> Float {
   case rock {
-    Rock(..) -> {
-      let d = vec3.ground_distance(p, rock.center) /. rock.radius
-      case d <. 1.0 {
-        True -> rock.height *. vec3.sqrt(1.0 -. d *. d)
+    Rock(center:, radius:, height:, ..) -> {
+      let x = { p.x -. center.x } /. radius
+      let z = { p.z -. center.z } /. radius
+      case x *. x +. z *. z <. 1.0 {
         False -> 0.0
+        True -> {
+          // The lowest facet plane above the point.
+          let low =
+            list.fold(facets(rock), 1.0, fn(low, f) {
+              float.min(
+                low,
+                { f.reach -. f.normal.x *. x -. f.normal.z *. z } /. f.normal.y,
+              )
+            })
+          height *. float.max(0.0, low)
+        }
       }
     }
     Hill(center:, radius:, height:, ..) -> {
@@ -166,6 +178,68 @@ const back_exponent = 1.6
 fn smooth(t: Float) -> Float {
   let k = float.clamp(t, min: 0.0, max: 1.0)
   k *. k *. { 3.0 -. 2.0 *. k }
+}
+
+/// One flat face of a rock. A point is under the facet when the dot product
+/// of `normal` and the point is at most `reach`. The point is measured from
+/// the rock's center, with x and z in units of its radius and y in units of
+/// its height. `normal.y` is always positive.
+pub type Facet {
+  Facet(normal: Vec3, reach: Float)
+}
+
+/// The facets of a rock: a level cap at its full height, a tilted top, a ring
+/// of 5 upper facets, and a ring of 8 steep lower facets. The rock is the
+/// space under all of them, and it stays inside its radius. A hill has none.
+pub fn facets(rock: Rock) -> List(Facet) {
+  case rock {
+    Hill(..) -> []
+    Rock(center:, radius:, ..) -> {
+      let seed = center.x *. 0.37 +. center.z *. 0.11 +. radius
+      let r = fn(k) { hash_float(seed, k) }
+      let turn = 2.0 *. maths.pi()
+      let facet = fn(yaw, pitch, reach) {
+        Facet(
+          Vec3(
+            maths.cos(pitch) *. maths.cos(yaw),
+            maths.sin(pitch),
+            maths.cos(pitch) *. maths.sin(yaw),
+          ),
+          reach,
+        )
+      }
+      let top_pitch = 1.2 +. 0.2 *. r(1)
+      let top =
+        facet(
+          turn *. r(0),
+          top_pitch,
+          maths.sin(top_pitch) *. { 0.86 +. 0.1 *. r(2) },
+        )
+      let upper =
+        list.map([0, 1, 2, 3, 4], fn(k) {
+          facet(
+            turn *. { r(3) +. { int.to_float(k) +. 0.5 *. r(10 + k) } /. 5.0 },
+            0.62 +. 0.3 *. r(20 + k),
+            0.78 +. 0.14 *. r(30 + k),
+          )
+        })
+      let lower =
+        list.map([0, 1, 2, 3, 4, 5, 6, 7], fn(k) {
+          facet(
+            turn *. { r(4) +. { int.to_float(k) +. 0.2 *. r(40 + k) } /. 8.0 },
+            0.12 +. 0.2 *. r(50 + k),
+            0.7 +. 0.14 *. r(60 + k),
+          )
+        })
+      [Facet(Vec3(0.0, 1.0, 0.0), 1.0), top, ..list.append(upper, lower)]
+    }
+  }
+}
+
+/// A repeatable value in [0, 1) for `seed` and channel `k`.
+fn hash_float(seed: Float, k: Int) -> Float {
+  let x = maths.sin(seed *. 12.9898 +. int.to_float(k) *. 78.233) *. 43_758.5453
+  x -. float.floor(x)
 }
 
 /// `p` moved up or down onto the ground surface.
