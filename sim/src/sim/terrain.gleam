@@ -163,39 +163,6 @@ pub fn foothold(terrain: Terrain, wanted: Vec3, toward aim: Vec3) -> Vec3 {
   place(terrain, moved)
 }
 
-/// Where to head from `from` to reach `to`. When a crevasse lies between
-/// them, this is the near end of its bridge, then the far end. Without a
-/// bridge, or with nothing in the way, it is `to`.
-pub fn route(terrain: Terrain, from from: Vec3, to to: Vec3) -> Vec3 {
-  list.fold(terrain.crevasses, to, fn(goal, c) {
-    let #(t0, s0) = along(c, from)
-    let #(t1, s1) = along(c, goal)
-    let crosses = s0 *. s1 <. 0.0
-    let cross_t = case crosses {
-      True -> t0 +. { t1 -. t0 } *. s0 /. { s0 -. s1 }
-      False -> -1.0
-    }
-    let blocked =
-      cross_t >. 0.0
-      && cross_t <. axis_length(c)
-      && float.absolute_value(cross_t -. c.bridge) >. bridge_half *. 0.5
-    case blocked, rims_at(c, c.bridge) {
-      True, Ok(#(left, right)) -> {
-        let on_bridge =
-          float.absolute_value(t0 -. c.bridge) <. bridge_half *. 0.8
-          && s0 >. left -. 40.0
-          && s0 <. right +. 40.0
-        let from_left = s0 <. 0.0
-        case on_bridge == from_left {
-          True -> across(c, c.bridge, right +. 30.0)
-          False -> across(c, c.bridge, left -. 30.0)
-        }
-      }
-      _, _ -> goal
-    }
-  })
-}
-
 /// How far `p` is outside the crevasse (negative inside), and the way out.
 /// The path over the bridge counts as open ground. A point over the gap
 /// beside the bridge is sent back onto it when that is closer than a rim.

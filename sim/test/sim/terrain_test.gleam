@@ -159,36 +159,6 @@ pub fn a_crevasse_blocks_the_way_except_at_its_bridge_test() {
   assert back.x <. beside.x
 }
 
-pub fn the_route_across_a_crevasse_goes_over_its_bridge_test() {
-  let ground = Terrain([], [crack])
-  let assert Ok(#(left, right)) = terrain.bridge_ends(crack)
-  let here = Vec3(120.0, 0.0, -250.0)
-  let there = Vec3(450.0, 0.0, 250.0)
-  // First to the near end of the bridge, then from the bridge to the far end.
-  let near = terrain.route(ground, from: here, to: there)
-  assert vec3.ground_distance(near, left) <. 31.0
-  assert near.z <. left.z
-  let far =
-    terrain.route(
-      ground,
-      from: vec3.lerp(left, right, 0.3),
-      to: Vec3(-150.0, 0.0, 250.0),
-    )
-  assert vec3.ground_distance(far, right) <. 31.0
-  assert far.z >. right.z
-  // Past the gap, or on the same side, the way is straight.
-  assert terrain.route(ground, from: far, to: there) == there
-  assert terrain.route(ground, from: here, to: Vec3(500.0, 0.0, -90.0))
-    == Vec3(500.0, 0.0, -90.0)
-  // Around the end of the crevasse the way is straight too.
-  assert terrain.route(
-      ground,
-      from: Vec3(-200.0, 0.0, -50.0),
-      to: Vec3(-100.0, 0.0, 200.0),
-    )
-    == Vec3(-100.0, 0.0, 200.0)
-}
-
 pub fn a_broad_rock_has_a_wide_low_top_test() {
   let boulder = terrain.rock(Vec3(0.0, 0.0, 0.0), 190.0, 48.0)
   let ground = Terrain([boulder], [])

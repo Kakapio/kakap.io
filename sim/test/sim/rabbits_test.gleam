@@ -131,6 +131,7 @@ pub fn rabbits_run_around_rocks_test() {
           ground,
           from: [spider],
           doors: [],
+          paths: rabbits.no_paths,
           within: bounds,
           dt: dt,
           config: config(),
@@ -157,6 +158,7 @@ pub fn rabbits_run_away_from_the_closest_of_two_spiders_test() {
         terrain.flat,
         from: [near, far],
         doors: [],
+        paths: rabbits.no_paths,
         within: bounds,
         dt: dt,
         config: config(),
@@ -183,6 +185,7 @@ fn run_home(
       terrain.flat,
       from: [spider],
       doors: [door],
+      paths: rabbits.no_paths,
       within: bounds,
       dt: dt,
       config: config(),
@@ -231,17 +234,19 @@ pub fn settle_shares_houses_in_id_order_test() {
 }
 
 pub fn a_rabbit_crosses_a_crevasse_at_the_bridge_to_get_home_test() {
-  // The crevasse runs along the x axis, with a bridge at x = 100.
+  // The crevasse runs along the x axis, with a bridge at x = -100. The way
+  // over the bridge is shorter than the way around either end.
   let crack =
     terrain.Crevasse(
       Vec3(-400.0, 0.0, 0.0),
       Vec3(400.0, 0.0, 0.0),
       115.0,
       170.0,
-      500.0,
+      300.0,
     )
   let ground = Terrain([], [crack])
   let door = Vec3(-150.0, 0.0, 250.0)
+  let paths = rabbits.find_paths(ground, doors: [door], within: bounds)
   let runner =
     rabbits.Rabbit(
       0,
@@ -263,13 +268,14 @@ pub fn a_rabbit_crosses_a_crevasse_at_the_bridge_to_get_home_test() {
           ground,
           from: [far_away],
           doors: [door],
+          paths:,
           within: bounds,
           dt: dt,
           config: config(),
         )
       let assert [r] = next
       let over_gap = terrain.height(ground, at: r.position) <. 0.0
-      let on_bridge = float.absolute_value(r.position.x -. 100.0) <. 20.001
+      let on_bridge = float.absolute_value(r.position.x +. 100.0) <. 20.001
       #(next, safe && { !over_gap || on_bridge }, crossed || over_gap)
     })
   let assert [r] = after
@@ -320,4 +326,79 @@ pub fn a_fleeing_rabbit_runs_along_a_wall_instead_of_into_it_test() {
   // It got away along the wall rather than sitting pinned against it.
   assert vec3.ground_distance(r.position, spider) >. 250.0
   assert float.absolute_value(r.position.z) >. 150.0
+}
+
+/// A house hill with its wall toward -z, and the spot in front of its door.
+const hill = terrain.Hill(Vec3(0.0, 0.0, 0.0), 210.0, 95.0, 50.0, 0.4363)
+
+const hill_door = Vec3(0.0, 0.0, -64.0)
+
+pub fn a_rabbit_behind_its_house_runs_around_it_to_the_door_test() {
+  let ground = Terrain([hill], [])
+  let paths = rabbits.find_paths(ground, doors: [hill_door], within: bounds)
+  let runner =
+    rabbits.Rabbit(
+      0,
+      Vec3(10.0, 0.0, 260.0),
+      vec3.zero,
+      0.0,
+      1.0,
+      0.0,
+      5.0,
+      0,
+      rabbits.GoingHome,
+    )
+  let run = fn(paths) {
+    list.fold(list.repeat(Nil, 240), #([runner], False), fn(acc, _) {
+      let #(herd, home) = acc
+      let next =
+        rabbits.step_around(
+          herd,
+          ground,
+          from: [far_away],
+          doors: [hill_door],
+          paths:,
+          within: bounds,
+          dt: dt,
+          config: config(),
+        )
+      #(next, home || list.all(next, rabbits.is_indoors))
+    })
+  }
+  // It gets home in 4 seconds. With no paths it is still behind the hill.
+  assert run(paths).1
+  assert !run(rabbits.no_paths).1
+}
+
+pub fn a_calm_rabbit_walks_around_a_hill_to_its_group_test() {
+  let ground = Terrain([hill], [])
+  let door = [hill_door]
+  let herd = [
+    rabbit_at(0, Vec3(0.0, 0.0, 260.0), 0.0),
+    rabbit_at(1, Vec3(-25.0, 0.0, -340.0), 0.0),
+    rabbit_at(2, Vec3(25.0, 0.0, -340.0), 0.0),
+    rabbit_at(3, Vec3(0.0, 0.0, -300.0), 0.0),
+  ]
+  let walk = fn(paths) {
+    list.fold(list.repeat(Nil, 1500), #(herd, paths), fn(acc, _) {
+      let #(herd, paths) = acc
+      let paths = rabbits.update_paths(paths, herd, dt: dt)
+      let next =
+        rabbits.step_around(
+          herd,
+          ground,
+          from: [far_away],
+          doors: door,
+          paths:,
+          within: bounds,
+          dt: dt,
+          config: config(),
+        )
+      #(next, paths)
+    }).0
+  }
+  let together = walk(rabbits.find_paths(ground, doors: door, within: bounds))
+  assert spread_from_center(together) <. 90.0
+  // Heading straight for the group, the lone rabbit stays behind the hill.
+  assert spread_from_center(walk(rabbits.no_paths)) >. 150.0
 }

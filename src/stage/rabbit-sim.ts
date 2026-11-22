@@ -63,23 +63,40 @@ export function config(s: RabbitSettings): RabbitConfig {
 export const spawn = (count: number, around: V3, spread: number, houses: number): Herd =>
   toArray(rabbits.settle(rabbits.herd(count, toV3(around), spread), houses));
 
+const toBounds = (b: Bounds) => rabbits.Bounds$Bounds(b.minX, b.maxX, b.minZ, b.maxZ);
+
+/** The ways the rabbits know around the obstacles, to each door and to the huddle. */
+export type Paths = rabbits.Paths$;
+
+/** The ways around the obstacles on `ground`. Build them again when the ground, the doors or the bounds change. */
+export const findPaths = (ground: Terrain, doors: V3[], bounds: Bounds): Paths =>
+  rabbits.find_paths(ground, fromArray(doors.map(toV3)), toBounds(bounds));
+
+/** The paths `dt` later. The way to the huddle is built again about once a second. */
+export const updatePaths = (paths: Paths, herd: Herd, dt: number): Paths =>
+  rabbits.update_paths(paths, fromArray(herd), dt);
+
 export function step(
   herd: Herd,
   ground: Terrain,
   spiders: V3[],
   doors: V3[],
+  paths: Paths,
   bounds: Bounds,
   dt: number,
   cfg: RabbitConfig,
 ): Herd {
-  const b = rabbits.Bounds$Bounds(
-    bounds.minX,
-    bounds.maxX,
-    bounds.minZ,
-    bounds.maxZ,
-  );
   return toArray(
-    rabbits.step_around(fromArray(herd), ground, fromArray(spiders.map(toV3)), fromArray(doors.map(toV3)), b, dt, cfg),
+    rabbits.step_around(
+      fromArray(herd),
+      ground,
+      fromArray(spiders.map(toV3)),
+      fromArray(doors.map(toV3)),
+      paths,
+      toBounds(bounds),
+      dt,
+      cfg,
+    ),
   );
 }
 

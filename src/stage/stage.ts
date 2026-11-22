@@ -103,6 +103,7 @@ export class Stage {
   private rabbitCfg = bunnies.config(bunnies.DEFAULT_RABBITS);
   private herd: bunnies.Herd;
   private bounds: bunnies.Bounds = { minX: -1, maxX: 1, minZ: -1, maxZ: 1 };
+  private paths!: bunnies.Paths;
   private pin: V3 | null = null;
   private hover: V3 | null = null;
 
@@ -182,7 +183,8 @@ export class Stage {
     });
     const threats = this.spiders.map((s) => s.view.body);
     const doors = this.land.houses.map((h) => h.door);
-    this.herd = bunnies.step(this.herd, this.land.ground, threats, doors, this.bounds, dt, this.rabbitCfg);
+    this.paths = bunnies.updatePaths(this.paths, this.herd, dt);
+    this.herd = bunnies.step(this.herd, this.land.ground, threats, doors, this.paths, this.bounds, dt, this.rabbitCfg);
     this.boil.tick(time);
     const rabbits = bunnies.view(this.herd, this.rabbitCfg);
     this.emotes.update(rabbits, time);
@@ -255,6 +257,11 @@ export class Stage {
     const homes = HOUSE_SPOTS.map((spot) => this.houseSpot(spot.u, spot.v));
     const crevasse = this.crevasseSpot(homes);
     this.land = scatterRocks((r) => !this.covers(r), homes, crevasse, this.boulderSpot(homes, crevasse));
+    this.paths = bunnies.findPaths(
+      this.land.ground,
+      this.land.houses.map((h) => h.door),
+      this.bounds,
+    );
   }
 
   private groundAt(spot: { u: number; v: number }): V3 {

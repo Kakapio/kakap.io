@@ -11,6 +11,7 @@ import gleam/int
 import gleam/list
 import gleam_community/maths
 import sim/angle
+import sim/nav
 import sim/terrain.{type Terrain}
 import sim/vec3.{type Vec3, Vec3}
 
@@ -100,6 +101,65 @@ const all_clear = 1.3
 /// so it steers around spiders instead of walking into their range.
 const wary = 1.2
 
+/// The width of a cell of the grid the rabbits find their way on.
+const path_cell = 24.0
+
+/// Seconds between two builds of the way to the huddle.
+const huddle_period = 1.0
+
+/// The ways the rabbits know around the obstacles: one field to each house
+/// door, in house order, and one to the huddle. The huddle moves, so its
+/// field is built again every `huddle_period`.
+pub opaque type Paths {
+  Paths(
+    grid: Result(nav.Grid, Nil),
+    doors: List(nav.Field),
+    huddle: Result(nav.Field, Nil),
+    age: Float,
+  )
+}
+
+/// No ways: every rabbit heads straight for where it wants to go.
+pub const no_paths = Paths(Error(Nil), [], Error(Nil), 0.0)
+
+/// The ways around the obstacles on `ground`, inside `bounds`, to each of
+/// `doors`. Build this again when any of the three changes.
+pub fn find_paths(
+  ground: Terrain,
+  doors doors: List(Vec3),
+  within bounds: Bounds,
+) -> Paths {
+  let grid =
+    nav.grid(
+      min_x: bounds.min_x,
+      max_x: bounds.max_x,
+      min_z: bounds.min_z,
+      max_z: bounds.max_z,
+      cell: path_cell,
+      blocked: blocked(_, ground, bounds),
+    )
+  Paths(Ok(grid), list.map(doors, nav.field(grid, _)), Error(Nil), 0.0)
+}
+
+/// The paths `dt` later. The way to the huddle is built again when it is
+/// `huddle_period` old, toward the center of the rabbits that are outside.
+pub fn update_paths(
+  paths: Paths,
+  rabbits: List(Rabbit),
+  dt dt: Float,
+) -> Paths {
+  let age = paths.age +. dt
+  case paths.grid, paths.huddle, age >=. huddle_period {
+    Ok(grid), Error(Nil), _ | Ok(grid), _, True ->
+      case outside_centroid(rabbits) {
+        Ok(center) ->
+          Paths(..paths, huddle: Ok(nav.field(grid, center)), age: 0.0)
+        Error(Nil) -> Paths(..paths, age:)
+      }
+    _, _, _ -> Paths(..paths, age:)
+  }
+}
+
 /// `count` rabbits on a sunflower spiral of radius `spread` around `center`.
 pub fn herd(
   count: Int,
@@ -188,6 +248,7 @@ pub fn step(
     terrain.flat,
     from: [spider],
     doors: [],
+    paths: no_paths,
     within: bounds,
     dt:,
     config:,
@@ -195,19 +256,22 @@ pub fn step(
 }
 
 /// The same as `step`, with any number of spiders, rabbits that run around
-/// the rocks and crevasses on `ground`, and houses. `doors` holds the spot in front of each
-/// house's door, in house order.
+/// the rocks and crevasses on `ground`, and houses. `doors` holds the spot in
+/// front of each house's door, in house order. `paths` holds the ways around
+/// the obstacles to the doors and to the huddle.
 pub fn step_around(
   rabbits: List(Rabbit),
   ground: Terrain,
   from spiders: List(Vec3),
   doors doors: List(Vec3),
+  paths paths: Paths,
   within bounds: Bounds,
   dt dt: Float,
   config config: Config,
 ) -> List(Rabbit) {
   list.map(rabbits, fn(rabbit) {
     let door = list.drop(doors, rabbit.home) |> list.first
+    let way_home = list.drop(paths.doors, rabbit.home) |> list.first
     case rabbit.shelter {
       Indoors(time) -> stay_in(rabbit, time, door, spiders, dt, config)
       _ -> {
@@ -215,7 +279,17 @@ pub fn step_around(
           list.filter(rabbits, fn(other) {
             other.id != rabbit.id && !is_indoors(other)
           })
-        step_one(rabbit, outside, ground, spiders, door, bounds, dt, config)
+        step_one(
+          rabbit,
+          outside,
+          ground,
+          spiders,
+          door,
+          #(way_home, paths.huddle),
+          bounds,
+          dt,
+          config,
+        )
       }
     }
   })
@@ -260,10 +334,12 @@ fn step_one(
   ground: Terrain,
   spiders: List(Vec3),
   door: Result(Vec3, Nil),
+  ways: #(Result(nav.Field, Nil), Result(nav.Field, Nil)),
   bounds: Bounds,
   dt: Float,
   config: Config,
 ) -> Rabbit {
+  let #(way_home, way_to_huddle) = ways
   let fear = feel(rabbit, others, spiders, dt, config)
   let dread = case fear >. panic_level {
     True -> rabbit.dread +. dt
@@ -281,7 +357,7 @@ fn step_one(
 
   let desired = case shelter, door, fear >. panic_level {
     GoingHome, Ok(door), _ ->
-      terrain.route(ground, from: rabbit.position, to: door)
+      follow(way_home, from: rabbit.position, to: door)
       |> vec3.subtract(rabbit.position)
       |> vec3.flat
       |> vec3.normalize
@@ -307,9 +383,9 @@ fn step_one(
           min: 0.0,
           max: 1.0,
         )
-      // The way to the group goes over the bridge when a crevasse is between.
+      // The way to the group goes around anything that is between.
       let way =
-        terrain.route(ground, from: rabbit.position, to: group)
+        follow(way_to_huddle, from: rabbit.position, to: group)
         |> vec3.subtract(rabbit.position)
         |> vec3.flat
       vec3.scale(vec3.normalize(way), config.walk_speed *. pull)
@@ -382,6 +458,15 @@ fn step_one(
         dread:,
         shelter:,
       )
+  }
+}
+
+/// The point to head for to get from `p` to `target`: along `way` when
+/// something is between them, and `target` itself with no way to follow.
+fn follow(way: Result(nav.Field, Nil), from p: Vec3, to target: Vec3) -> Vec3 {
+  case way {
+    Ok(field) -> nav.toward(field, from: p, to: target)
+    Error(Nil) -> target
   }
 }
 
