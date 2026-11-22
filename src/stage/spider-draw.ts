@@ -19,7 +19,11 @@ const add = (a: V3, b: V3): V3 => ({
   z: a.z + b.z,
 });
 const mul = (a: V3, k: number): V3 => ({ x: a.x * k, y: a.y * k, z: a.z * k });
-const UP: V3 = { x: 0, y: 1, z: 0 };
+const cross = (a: V3, b: V3): V3 => ({
+  x: a.y * b.z - a.z * b.y,
+  y: a.z * b.x - a.x * b.z,
+  z: a.x * b.y - a.y * b.x,
+});
 
 /** Where the low sun throws the shadow of `p` onto the ground. */
 const shadowOf = (p: V3): V3 => ({
@@ -28,23 +32,31 @@ const shadowOf = (p: V3): V3 => ({
   z: p.z + p.y * 0.35,
 });
 
-type Frame = { body: V3; forward: V3; side: V3 };
+/** The body's axes, tilted by pitch and roll. `k` scales the body parts. */
+type Frame = { body: V3; forward: V3; side: V3; up: V3; k: number };
 
 function frameOf(s: SpiderView): Frame {
-  const forward = { x: Math.cos(s.heading), y: 0, z: Math.sin(s.heading) };
-  return { body: s.body, forward, side: { x: -forward.z, y: 0, z: forward.x } };
+  const [ch, sh] = [Math.cos(s.heading), Math.sin(s.heading)];
+  const forward = { x: ch * Math.cos(s.pitch), y: Math.sin(s.pitch), z: sh * Math.cos(s.pitch) };
+  const side = { x: -sh * Math.cos(s.roll), y: Math.sin(s.roll), z: ch * Math.cos(s.roll) };
+  return { body: s.body, forward, side, up: cross(side, forward), k: s.size };
 }
 
-const cephOf = (f: Frame) => add(f.body, mul(f.forward, 14));
+const cephOf = (f: Frame) => add(f.body, mul(f.forward, 14 * f.k));
 const abdomenOf = (f: Frame) =>
-  add(add(f.body, mul(f.forward, -56)), mul(UP, 10));
+  add(add(f.body, mul(f.forward, -56 * f.k)), mul(f.up, 10 * f.k));
 
 export function spiderLayers(ctx: CanvasRenderingContext2D, cam: Camera, s: SpiderView, opts: DrawOptions): Layers {
   const f = frameOf(s);
-  const pieces: Piece[] = s.legs.map((leg, i) => ({
-    depth: (cam.project(leg.hip).depth + cam.project(leg.knee).depth + cam.project(leg.ankle).depth) / 3,
-    draw: () => drawLeg(ctx, cam, leg, i, opts),
-  }));
+  const pieces: Piece[] = s.legs.map((leg, i) => {
+    const middle = (cam.project(leg.hip).depth + cam.project(leg.knee).depth + cam.project(leg.ankle).depth) / 3;
+    // A foot up on a rock sorts by the foot, so the rock does not cover it.
+    const onRock = leg.foot.y > 2 && !leg.swinging;
+    return {
+      depth: onRock ? Math.min(middle, cam.project(leg.foot).depth) : middle,
+      draw: () => drawLeg(ctx, cam, leg, i, opts, f.k),
+    };
+  });
   pieces.push({ depth: cam.project(abdomenOf(f)).depth, draw: () => drawAbdomen(ctx, cam, f, opts) });
   pieces.push({ depth: cam.project(cephOf(f)).depth - 1, draw: () => drawHead(ctx, cam, f, opts) });
   return {
@@ -76,13 +88,13 @@ function drawShadows(
     ctx.fillStyle = INK.shadow;
     ctx.fill();
   };
-  blob(abdomenOf(f), 46);
-  blob(cephOf(f), 28);
+  blob(abdomenOf(f), 46 * f.k);
+  blob(cephOf(f), 28 * f.k);
   for (const leg of s.legs) {
     const pts = [leg.hip, leg.knee, leg.ankle, leg.foot].map((p) =>
       cam.project(shadowOf(p)),
     );
-    line(ctx, pts, INK.legShadow, Math.max(1, 3 * pts[1]!.scale));
+    line(ctx, pts, INK.legShadow, Math.max(1, 3 * f.k * pts[1]!.scale));
   }
 }
 
@@ -92,8 +104,9 @@ function drawLeg(
   leg: LegView,
   i: number,
   opts: DrawOptions,
+  k: number,
 ) {
-  const widths = [9, 7, 3.6, 1.2];
+  const widths = [9, 7, 3.6, 1.2].map((w) => w * k);
   const pts: InkPoint[] = [leg.hip, leg.knee, leg.ankle, leg.foot].map(
     (p, k) => {
       const q = cam.project(p);
@@ -118,7 +131,7 @@ function drawLeg(
   const len = Math.hypot(dx, dy) || 1;
   const nx = -dy / len;
   const ny = dx / len;
-  const hair = 7 * cam.project(leg.ankle).scale;
+  const hair = 7 * k * cam.project(leg.ankle).scale;
   const bristles = [];
   for (let k = 1; k <= 6; k++) {
     const t = k / 7;
@@ -137,7 +150,7 @@ function drawLeg(
       ctx,
       [p!, q!],
       INK.ink,
-      Math.max(0.6, 1.1 * cam.project(leg.knee).scale),
+      Math.max(0.6, 1.1 * k * cam.project(leg.knee).scale),
     );
 }
 
@@ -152,6 +165,7 @@ function ellipsoid(
   fill: string,
   boil: Boil,
   seed: number,
+  k: number,
 ) {
   const c = boil.jitter(cam.project(center), seed);
   const tip = cam.project(add(center, mul(forward, rx)));
@@ -163,7 +177,7 @@ function ellipsoid(
   ctx.fillStyle = fill;
   ctx.fill();
   ctx.strokeStyle = INK.ink;
-  ctx.lineWidth = Math.max(1.2, 3 * c.scale);
+  ctx.lineWidth = Math.max(1.2, 3 * Math.max(0.7, k) * c.scale);
   ctx.stroke();
 }
 
@@ -174,19 +188,20 @@ function drawAbdomen(
   opts: DrawOptions,
 ) {
   const center = abdomenOf(f);
-  const rx = 54;
-  const ry = 40;
-  ellipsoid(ctx, cam, center, f.forward, rx, ry, INK.inkSoft, opts.boil, 201);
+  const rx = 54 * f.k;
+  const ry = 40 * f.k;
+  ellipsoid(ctx, cam, center, f.forward, rx, ry, INK.inkSoft, opts.boil, 201, f.k);
   ellipsoid(
     ctx,
     cam,
-    add(center, mul(UP, ry * 0.35)),
+    add(center, mul(f.up, ry * 0.35)),
     f.forward,
     rx * 0.62,
     ry * 0.5,
     "#3a3225",
     opts.boil,
     202,
+    f.k,
   );
 
   // Pale chevrons down the back.
@@ -194,16 +209,16 @@ function drawAbdomen(
     cam.project(
       add(
         add(add(center, mul(f.forward, t)), mul(f.side, s)),
-        mul(UP, ry * 0.9),
+        mul(f.up, ry * 0.9),
       ),
     );
   for (let k = 0; k < 3; k++) {
     const t = rx * 0.4 - k * rx * 0.32;
     const width = ry * (0.42 - k * 0.08);
-    const pts = [on(t - 10, -width), on(t, 0), on(t - 10, width)].map((p, j) =>
+    const pts = [on(t - 10 * f.k, -width), on(t, 0), on(t - 10 * f.k, width)].map((p, j) =>
       opts.boil.jitter(p, 230 + k * 3 + j),
     );
-    line(ctx, pts, INK.bone, Math.max(1, 2.6 * pts[1]!.scale));
+    line(ctx, pts, INK.bone, Math.max(1, 2.6 * f.k * pts[1]!.scale));
   }
 }
 
@@ -214,38 +229,39 @@ function drawHead(
   opts: DrawOptions,
 ) {
   const ceph = cephOf(f);
-  const rx = 30;
-  const ry = 24;
+  const k = f.k;
+  const rx = 30 * k;
+  const ry = 24 * k;
   const at = (t: number, s: number, u: number) =>
-    add(add(add(ceph, mul(f.forward, t)), mul(f.side, s)), mul(UP, u));
+    add(add(add(ceph, mul(f.forward, t)), mul(f.side, s)), mul(f.up, u));
 
   // Pedipalps: two short feelers that twitch.
   for (const side of [-1, 1]) {
-    const twitch = Math.sin(opts.time * 5 + side * 1.7) * 5;
+    const twitch = Math.sin(opts.time * 5 + side * 1.7) * 5 * k;
     const pts = [
-      at(rx * 0.7, side * 10, -4),
-      at(rx + 20, side * 18, 10 + twitch),
-      at(rx + 34, side * 15, -28 + twitch),
+      at(rx * 0.7, side * 10 * k, -4 * k),
+      at(rx + 20 * k, side * 18 * k, 10 * k + twitch),
+      at(rx + 34 * k, side * 15 * k, -28 * k + twitch),
     ].map((p, j) => {
       const q = cam.project(p);
       return opts.boil.jitter(
-        { x: q.x, y: q.y, w: Math.max(0.8, [6, 4, 1.4][j]! * q.scale) },
+        { x: q.x, y: q.y, w: Math.max(0.8, [6, 4, 1.4][j]! * k * q.scale) },
         300 + side * 5 + j,
       );
     });
     taperedStroke(ctx, pts, INK.ink);
   }
 
-  ellipsoid(ctx, cam, ceph, f.forward, rx, ry, INK.inkSoft, opts.boil, 210);
+  ellipsoid(ctx, cam, ceph, f.forward, rx, ry, INK.inkSoft, opts.boil, 210, k);
 
   // Fangs.
   for (const side of [-1, 1]) {
     const pts = [
-      at(rx * 0.85, side * 6, -ry * 0.2),
-      at(rx * 1.15, side * 5, -ry * 0.8),
+      at(rx * 0.85, side * 6 * k, -ry * 0.2),
+      at(rx * 1.15, side * 5 * k, -ry * 0.8),
     ].map((p, j) => {
       const q = cam.project(p);
-      return { x: q.x, y: q.y, w: Math.max(0.8, [5, 1][j]! * q.scale) };
+      return { x: q.x, y: q.y, w: Math.max(0.8, [5, 1][j]! * k * q.scale) };
     });
     taperedStroke(ctx, pts, INK.ink);
   }
@@ -259,8 +275,9 @@ function drawHead(
     [0.45, -9, 1.8],
     [0.45, 9, 1.8],
   ];
-  for (const [t, s, r] of eyes) {
-    const p = cam.project(at(rx * t, s, ry * 0.6));
+  for (const [t, across, size] of eyes) {
+    const r = size * k;
+    const p = cam.project(at(rx * t, across * k, ry * 0.6));
     ctx.fillStyle = INK.eyeGlow;
     ctx.beginPath();
     ctx.arc(p.x, p.y, r * 2.8 * p.scale, 0, Math.PI * 2);
@@ -289,9 +306,9 @@ function drawSkeleton(
       const a = (k / 16) * Math.PI * 2;
       ring.push(
         cam.project({
-          x: leg.home.x + Math.cos(a) * 10,
-          y: 0,
-          z: leg.home.z + Math.sin(a) * 10,
+          x: leg.home.x + Math.cos(a) * 10 * f.k,
+          y: leg.home.y,
+          z: leg.home.z + Math.sin(a) * 10 * f.k,
         }),
       );
     }
@@ -315,7 +332,7 @@ function drawSkeleton(
   const ground = { ...f.body, y: 0 };
   line(
     ctx,
-    [cam.project(ground), cam.project(add(ground, mul(f.forward, 90)))],
+    [cam.project(ground), cam.project(add(ground, mul(f.forward, 90 * f.k)))],
     "#efe3b8",
     1.5,
   );

@@ -4,10 +4,12 @@
 //// only one group swings at a time.
 
 import gleam/float
+import gleam/int
 import gleam/list
 import gleam/result
 import gleam_community/maths
 import sim/angle
+import sim/terrain.{type Terrain}
 import sim/two_bone
 import sim/vec3.{type Vec3, Vec3}
 
@@ -46,8 +48,8 @@ pub type Leg {
   Leg(side: Side, index: Int, foot: Vec3, step: Step)
 }
 
-/// `position` is the point on the ground under the body. `heading` is the yaw
-/// the body faces. `speed` is the forward ground speed.
+/// `position` is the point on the ground plane under the body. `heading` is
+/// the yaw the body faces. `speed` is the forward ground speed.
 pub type Spider {
   Spider(position: Vec3, heading: Float, speed: Float, legs: List(Leg))
 }
@@ -68,8 +70,15 @@ pub type LegPose {
   )
 }
 
+/// `pitch` tilts the nose up and `roll` tilts the right side up, in radians.
 pub type Pose {
-  Pose(body: Vec3, heading: Float, legs: List(LegPose))
+  Pose(
+    body: Vec3,
+    heading: Float,
+    pitch: Float,
+    roll: Float,
+    legs: List(LegPose),
+  )
 }
 
 pub fn new(
@@ -77,11 +86,23 @@ pub fn new(
   heading heading: Float,
   config config: Config,
 ) -> Spider {
+  new_on(terrain.flat, position, heading, config)
+}
+
+/// The same as `new`, with each foot placed on the ground surface.
+pub fn new_on(
+  ground: Terrain,
+  position: Vec3,
+  heading: Float,
+  config: Config,
+) -> Spider {
   let position = vec3.flat(position)
   let legs =
     list.flat_map([Left, Right], fn(side) {
       list.map([0, 1, 2, 3], fn(index) {
-        Leg(side, index, home(position, heading, side, index, config), Planted)
+        let foot =
+          terrain.place(ground, home(position, heading, side, index, config))
+        Leg(side, index, foot, Planted)
       })
     })
   Spider(position, heading, 0.0, legs)
@@ -91,6 +112,17 @@ pub fn new(
 /// stops `keep_distance` from the target, and keeps turning to face it.
 pub fn walk(
   spider: Spider,
+  toward target: Vec3,
+  dt dt: Float,
+  config config: Config,
+) -> Spider {
+  walk_on(spider, terrain.flat, toward: target, dt:, config:)
+}
+
+/// The same as `walk`, on uneven `ground`. Feet land on the ground surface.
+pub fn walk_on(
+  spider: Spider,
+  ground: Terrain,
   toward target: Vec3,
   dt dt: Float,
   config config: Config,
@@ -121,12 +153,14 @@ pub fn walk(
 
   let legs =
     spider.legs
-    |> list.map(swing(_, position, heading, velocity, dt, config))
-    |> start_steps(position, heading, velocity, speed, config)
+    |> list.map(swing(_, ground, position, heading, velocity, dt, config))
+    |> start_steps(ground, position, heading, velocity, speed, config)
   Spider(position, heading, speed, legs)
 }
 
-/// The joint positions for drawing. The body rises a little while legs swing.
+/// The joint positions for drawing. The body rises a little while legs swing,
+/// and it follows the ground under its feet: it rises over rocks, and tilts
+/// when the front, back, left or right feet stand higher.
 pub fn pose(spider: Spider, config: Config) -> Pose {
   let swing_lift =
     list.fold(spider.legs, 0.0, fn(total, leg) {
@@ -135,12 +169,38 @@ pub fn pose(spider: Spider, config: Config) -> Pose {
         Planted -> total
       }
     })
-  let height = config.height +. config.lift *. 0.25 *. swing_lift /. 8.0
+  let ground_under = fn(keep: fn(Leg) -> Bool) {
+    let legs = list.filter(spider.legs, keep)
+    case legs {
+      [] -> 0.0
+      _ ->
+        list.fold(legs, 0.0, fn(total, leg) { total +. base(leg) })
+        /. int.to_float(list.length(legs))
+    }
+  }
+  let level = ground_under(fn(_) { True })
+  let front = ground_under(fn(leg) { leg.index < 2 })
+  let back = ground_under(fn(leg) { leg.index >= 2 })
+  let left = ground_under(fn(leg) { leg.side == Left })
+  let right = ground_under(fn(leg) { leg.side == Right })
+  // The tilt is twice what the feet give, so it reads at this size.
+  let pitch = 2.0 *. maths.atan2(front -. back, 1.17 *. config.stance)
+  let roll = 2.0 *. maths.atan2(right -. left, 1.44 *. config.stance)
+  let height =
+    level +. config.height +. config.lift *. 0.25 *. swing_lift /. 8.0
   let body = vec3.add(spider.position, Vec3(0.0, height, 0.0))
+  let forward = vec3.from_yaw(spider.heading)
+  let across = vec3.from_yaw(spider.heading +. maths.pi() /. 2.0)
+  let tilt = fn(offset: Vec3) {
+    vec3.dot(offset, forward)
+    *. maths.sin(pitch)
+    +. vec3.dot(offset, across)
+    *. maths.sin(roll)
+  }
 
   let legs =
     list.map(spider.legs, fn(leg) {
-      let hip =
+      let flat_hip =
         around(
           spider.position,
           spider.heading,
@@ -148,7 +208,15 @@ pub fn pose(spider: Spider, config: Config) -> Pose {
           hip_angle(leg.index),
           config.body_radius,
         )
-        |> vec3.add(Vec3(0.0, height, 0.0))
+      let hip =
+        vec3.add(
+          flat_hip,
+          Vec3(
+            0.0,
+            height +. tilt(vec3.subtract(flat_hip, spider.position)),
+            0.0,
+          ),
+        )
       let outward =
         vec3.normalize(vec3.flat(vec3.subtract(leg.foot, spider.position)))
       let ankle =
@@ -176,7 +244,16 @@ pub fn pose(spider: Spider, config: Config) -> Pose {
         stretched: bend.stretched,
       )
     })
-  Pose(body, spider.heading, legs)
+  Pose(body, spider.heading, pitch, roll, legs)
+}
+
+/// The height of the ground the foot stands on, or is stepping across.
+fn base(leg: Leg) -> Float {
+  case leg.step {
+    Planted -> leg.foot.y
+    Swinging(from, to, progress) ->
+      from.y +. { to.y -. from.y } *. ease(progress)
+  }
 }
 
 /// Legs alternate between two groups: left 0, right 1, left 2, right 3 in
@@ -197,6 +274,7 @@ pub fn is_swinging(leg: Leg) -> Bool {
 
 fn swing(
   leg: Leg,
+  ground: Terrain,
   position: Vec3,
   heading: Float,
   velocity: Vec3,
@@ -206,7 +284,7 @@ fn swing(
   case leg.step {
     Planted -> leg
     Swinging(from, _, progress) -> {
-      let to = landing(leg, position, heading, velocity, config)
+      let to = landing(leg, ground, position, heading, velocity, config)
       let progress = progress +. dt /. config.step_time
       case progress >=. 1.0 {
         True -> Leg(..leg, foot: to, step: Planted)
@@ -223,6 +301,7 @@ fn swing(
 
 fn start_steps(
   legs: List(Leg),
+  ground: Terrain,
   position: Vec3,
   heading: Float,
   velocity: Vec3,
@@ -240,7 +319,7 @@ fn start_steps(
       ..leg,
       step: Swinging(
         leg.foot,
-        landing(leg, position, heading, velocity, config),
+        landing(leg, ground, position, heading, velocity, config),
         0.0,
       ),
     )
@@ -293,6 +372,7 @@ fn start_steps(
 /// of travel so it lands in front and has room to drift back.
 fn landing(
   leg: Leg,
+  ground: Terrain,
   position: Vec3,
   heading: Float,
   velocity: Vec3,
@@ -302,12 +382,12 @@ fn landing(
     home(position, heading, leg.side, leg.index, config),
     vec3.scale(velocity, config.step_time),
   )
+  |> terrain.place(ground, _)
 }
 
 fn arc(from: Vec3, to: Vec3, progress: Float, lift: Float) -> Vec3 {
-  let eased = progress *. progress *. { 3.0 -. 2.0 *. progress }
   vec3.add(
-    vec3.lerp(from, to, eased),
+    vec3.lerp(from, to, ease(progress)),
     Vec3(0.0, lift *. maths.sin(maths.pi() *. progress), 0.0),
   )
 }
@@ -372,6 +452,10 @@ fn foot_reach(index: Int) -> Float {
     2 -> 0.92
     _ -> 1.0
   }
+}
+
+fn ease(progress: Float) -> Float {
+  progress *. progress *. { 3.0 -. 2.0 *. progress }
 }
 
 fn move_toward(current: Float, target: Float, max_step: Float) -> Float {

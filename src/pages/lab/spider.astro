@@ -3,11 +3,11 @@ import Base from "../../layouts/Base.astro";
 import "../../styles/lab.css";
 
 const sliders = [
-  { key: "height", label: "Body height", min: 40, max: 260, step: 1 },
-  { key: "upper", label: "Upper leg", min: 80, max: 280, step: 1 },
-  { key: "lower", label: "Lower leg", min: 80, max: 300, step: 1 },
-  { key: "stance", label: "Stance width", min: 100, max: 340, step: 1 },
-  { key: "stepDistance", label: "Step distance", min: 20, max: 160, step: 1 },
+  { key: "height", label: "Body height", min: 20, max: 260, step: 1 },
+  { key: "upper", label: "Upper leg", min: 30, max: 280, step: 1 },
+  { key: "lower", label: "Lower leg", min: 30, max: 300, step: 1 },
+  { key: "stance", label: "Stance width", min: 40, max: 340, step: 1 },
+  { key: "stepDistance", label: "Step distance", min: 10, max: 160, step: 1 },
   { key: "stepTime", label: "Step time", min: 0.06, max: 0.6, step: 0.01 },
   { key: "lift", label: "Foot lift", min: 0, max: 100, step: 1 },
   { key: "speed", label: "Speed", min: 20, max: 400, step: 5 },
@@ -16,8 +16,8 @@ const sliders = [
 ];
 ---
 
-<Base title="Spider Lab · kakap.io" description="A tall spider walking on two-bone IK legs with an alternating gait, in a 2.5D scene.">
-  <canvas id="tank" aria-label="A tall spider that walks toward your pointer or finger."></canvas>
+<Base title="Spider Lab · kakap.io" description="A spider walking on two-bone IK legs with an alternating gait, in a 2.5D scene.">
+  <canvas id="tank" aria-label="A spider that walks toward your pointer or finger."></canvas>
 
   <div id="hud">
     <a class="back" href="/">← kakap.io</a>
@@ -32,6 +32,10 @@ const sliders = [
   <details id="panel" open>
     <summary>Controls</summary>
     <div class="rows">
+      <div class="seg" role="radiogroup" aria-label="Spider">
+        <input type="radio" name="kind" id="kind-small" value="small" checked /><label for="kind-small">Small</label>
+        <input type="radio" name="kind" id="kind-giant" value="giant" /><label for="kind-giant">Giant</label>
+      </div>
       <label class="check"><input type="checkbox" id="skeleton" checked /> Show IK bones and rest rings</label>
       <label class="check"><input type="checkbox" id="boil" checked /> Hand-drawn line boil</label>
       {

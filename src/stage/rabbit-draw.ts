@@ -34,6 +34,38 @@ function lookOf(id: number): Look {
   };
 }
 
+type Mark = "!" | "?";
+
+const MARK_COLOR: Record<Mark, string> = { "!": "#ff2b1c", "?": "#ffd84a" };
+
+/** Seconds a mark stays up. */
+const MARK_TIME = 1.6;
+
+/**
+ * Game-style marks over the rabbits' heads: a red "!" when a rabbit panics,
+ * and a "?" when it calms down again.
+ */
+export class Emotes {
+  private readonly fleeing = new Map<number, boolean>();
+  private readonly shown = new Map<number, { mark: Mark; since: number }>();
+
+  update(herd: RabbitView[], time: number) {
+    for (const r of herd) {
+      const was = this.fleeing.get(r.id);
+      if (was !== undefined && was !== r.fleeing) {
+        this.shown.set(r.id, { mark: r.fleeing ? "!" : "?", since: time });
+      }
+      this.fleeing.set(r.id, r.fleeing);
+    }
+  }
+
+  of(id: number, time: number): { mark: Mark; age: number } | null {
+    const e = this.shown.get(id);
+    if (!e || time - e.since > MARK_TIME) return null;
+    return { mark: e.mark, age: time - e.since };
+  }
+}
+
 /**
  * Rabbit folk drawn as upright cut-outs that always face the screen, flipped to
  * face the way they run. All sizes are in world units, scaled by perspective.
@@ -44,6 +76,7 @@ export function rabbitLayers(
   herd: RabbitView[],
   time: number,
   boil: Boil,
+  emotes: Emotes,
 ): Layers {
   const shadows = () => {
     for (const r of herd) {
@@ -63,7 +96,10 @@ export function rabbitLayers(
   const ui = () => {
     for (const r of herd) {
       const name = lookOf(r.id).name;
-      if (name) drawNametag(ctx, cam, r, name);
+      let top = headTop(cam, r);
+      if (name) top = drawNametag(ctx, cam, r, name);
+      const e = emotes.of(r.id, time);
+      if (e) drawMark(ctx, cam.project({ ...r.position, y: r.lift }).x, top - 4, e.mark, e.age, time);
     }
   };
   return { shadows, pieces, ui };
@@ -79,8 +115,7 @@ function drawNametag(
   cam: Camera,
   r: RabbitView,
   name: string,
-) {
-  // The rabbit is an upright cut-out sized by `scale`, so the tag sits above it in screen space too.
+): number {
   const base = cam.project({ ...r.position, y: r.lift });
   ctx.font = "500 14px 'Pixelify Sans', ui-monospace, monospace";
   ctx.textAlign = "left";
@@ -89,11 +124,52 @@ function drawNametag(
   const width = text + 8;
   const height = 18;
   const x = Math.round(base.x - width / 2);
-  const y = Math.round(base.y - 56 * base.scale - 6 - height);
+  const y = Math.round(headTop(cam, r) - height);
   ctx.fillStyle = "rgba(0, 0, 0, 0.32)";
   ctx.fillRect(x, y, width, height);
   ctx.fillStyle = "#ffffff";
   ctx.fillText(name, x + 4, y + 14);
+  return y;
+}
+
+/** The screen y just above the ear tips. The rabbit is an upright cut-out sized by `scale`. */
+function headTop(cam: Camera, r: RabbitView): number {
+  const base = cam.project({ ...r.position, y: r.lift });
+  return base.y - 56 * base.scale - 6;
+}
+
+/** A pixel-font mark that pops in, bobs, and fades out. `bottom` is its baseline. */
+function drawMark(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  bottom: number,
+  mark: Mark,
+  age: number,
+  time: number,
+) {
+  const pop = age < 0.2 ? backOut(age / 0.2) : 1;
+  const fade = Math.min(1, (MARK_TIME - age) / 0.3);
+  const bob = Math.sin(time * 9) * 1.5;
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, fade);
+  ctx.translate(Math.round(x), Math.round(bottom + bob));
+  ctx.scale(pop, pop);
+  ctx.font = "700 26px 'Pixelify Sans', ui-monospace, monospace";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "alphabetic";
+  ctx.lineJoin = "miter";
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = "#140d08";
+  ctx.strokeText(mark, 0, 0);
+  ctx.fillStyle = MARK_COLOR[mark];
+  ctx.fillText(mark, 0, 0);
+  ctx.restore();
+}
+
+/** Ease from 0 to 1 with a small overshoot. */
+function backOut(t: number): number {
+  const c = 2.2;
+  return 1 + (c + 1) * (t - 1) ** 3 + c * (t - 1) ** 2;
 }
 
 function drawRabbit(

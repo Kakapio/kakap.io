@@ -1,5 +1,5 @@
 //// A small herd of rabbits. Calm rabbits huddle together. A rabbit panics when
-//// the spider comes close, and panic spreads to rabbits near it. Panicked
+//// a spider comes close, and panic spreads to rabbits near it. Panicked
 //// rabbits run away from the spider and away from each other, so the herd
 //// splits up. Fear fades once the spider is gone, and they huddle again.
 
@@ -8,6 +8,7 @@ import gleam/int
 import gleam/list
 import gleam_community/maths
 import sim/angle
+import sim/terrain.{type Terrain}
 import sim/vec3.{type Vec3, Vec3}
 
 /// Lengths are in world units and times in seconds.
@@ -56,6 +57,12 @@ const contagion = 0.8
 const wall_margin = 90.0
 
 const golden_angle = 2.399963
+
+/// Distance from a rock's edge where the rock starts to push back.
+const rock_margin = 36.0
+
+/// The closest a rabbit's center comes to a rock's edge.
+const rock_pad = 12.0
 
 /// `count` rabbits on a sunflower spiral of radius `spread` around `center`.
 pub fn herd(
@@ -115,19 +122,40 @@ pub fn step(
   dt dt: Float,
   config config: Config,
 ) -> List(Rabbit) {
-  list.map(rabbits, step_one(_, rabbits, spider, bounds, dt, config))
+  step_around(
+    rabbits,
+    terrain.flat,
+    from: [spider],
+    within: bounds,
+    dt:,
+    config:,
+  )
+}
+
+/// The same as `step`, with any number of spiders, and rabbits that run
+/// around the rocks on `ground`.
+pub fn step_around(
+  rabbits: List(Rabbit),
+  ground: Terrain,
+  from spiders: List(Vec3),
+  within bounds: Bounds,
+  dt dt: Float,
+  config config: Config,
+) -> List(Rabbit) {
+  list.map(rabbits, step_one(_, rabbits, ground, spiders, bounds, dt, config))
 }
 
 fn step_one(
   rabbit: Rabbit,
   herd: List(Rabbit),
-  spider: Vec3,
+  ground: Terrain,
+  spiders: List(Vec3),
   bounds: Bounds,
   dt: Float,
   config: Config,
 ) -> Rabbit {
   let others = list.filter(herd, fn(other) { other.id != rabbit.id })
-  let fear = feel(rabbit, others, spider, dt, config)
+  let fear = feel(rabbit, others, spiders, dt, config)
   let separation = personal_space(rabbit, others, config.spacing)
   let group = case others {
     [] -> rabbit.position
@@ -136,7 +164,7 @@ fn step_one(
 
   let desired = case fear >. panic_level {
     True ->
-      vec3.normalize(vec3.flat(vec3.subtract(rabbit.position, spider)))
+      escape(rabbit, spiders)
       |> vec3.add(vec3.scale(
         vec3.normalize(vec3.flat(vec3.subtract(rabbit.position, group))),
         0.8,
@@ -161,11 +189,18 @@ fn step_one(
   }
 
   let desired =
-    vec3.add(desired, walls(rabbit.position, bounds, config.run_speed))
+    desired
+    |> vec3.add(walls(rabbit.position, bounds, config.run_speed))
+    |> vec3.add(vec3.scale(
+      terrain.avoid(ground, rabbit.position, rock_margin),
+      config.run_speed,
+    ))
   let velocity =
     vec3.move_toward(rabbit.velocity, desired, config.acceleration *. dt)
   let position =
-    clamp_to(vec3.add(rabbit.position, vec3.scale(velocity, dt)), bounds)
+    vec3.add(rabbit.position, vec3.scale(velocity, dt))
+    |> terrain.push_out(ground, _, rock_pad)
+    |> clamp_to(bounds)
   let speed = vec3.length(velocity)
   let heading = case speed >. 5.0 {
     True -> angle.turn_toward(rabbit.heading, vec3.yaw(velocity), 12.0 *. dt)
@@ -176,17 +211,29 @@ fn step_one(
   Rabbit(rabbit.id, position, velocity, heading, fear, hop)
 }
 
-/// Full fear inside the spider's radius, a share of any scared neighbour's
+/// The way away from the spiders, weighted toward the closest ones.
+fn escape(rabbit: Rabbit, spiders: List(Vec3)) -> Vec3 {
+  list.fold(spiders, vec3.zero, fn(sum, spider) {
+    let away = vec3.flat(vec3.subtract(rabbit.position, spider))
+    let d = float.max(1.0, vec3.length(away))
+    vec3.add(sum, vec3.scale(away, 1.0 /. { d *. d *. d }))
+  })
+  |> vec3.normalize
+}
+
+/// Full fear inside a spider's radius, a share of any scared neighbour's
 /// fear, or the rabbit's own fear fading away, whichever is highest.
 fn feel(
   rabbit: Rabbit,
   others: List(Rabbit),
-  spider: Vec3,
+  spiders: List(Vec3),
   dt: Float,
   config: Config,
 ) -> Float {
   let threat = case
-    vec3.ground_distance(rabbit.position, spider) <. config.fear_radius
+    list.any(spiders, fn(spider) {
+      vec3.ground_distance(rabbit.position, spider) <. config.fear_radius
+    })
   {
     True -> 1.0
     False -> 0.0

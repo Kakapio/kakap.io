@@ -4,6 +4,7 @@ import * as vec3 from "@gleam/sim/sim/vec3.mjs";
 import * as wander from "@gleam/sim/sim/wander.mjs";
 import { toArray } from "../gleam";
 import type { V3 } from "./camera";
+import type { Terrain } from "./terrain-sim";
 
 export type SpiderState = spider.Spider$;
 export type SpiderConfig = spider.Config$;
@@ -37,14 +38,19 @@ export type LegView = {
   stretched: boolean;
 };
 
+/** `pitch` tilts the nose up and `roll` the right side up. */
+/** `size` scales the drawn body parts: 1 for the giant, smaller for small spiders. */
 export type SpiderView = {
+  size: number;
   body: V3;
   heading: number;
+  pitch: number;
+  roll: number;
   speed: number;
   legs: LegView[];
 };
 
-export const DEFAULT_SPIDER: SpiderSettings = {
+const GIANT: SpiderSettings = {
   height: 120,
   bodyRadius: 20,
   upper: 170,
@@ -59,6 +65,25 @@ export const DEFAULT_SPIDER: SpiderSettings = {
   turnRateDeg: 126,
   keepDistance: 140,
 };
+
+const SMALL: SpiderSettings = {
+  height: 55,
+  bodyRadius: 10,
+  upper: 75,
+  lower: 85,
+  tip: 18,
+  stance: 95,
+  stepDistance: 32,
+  stepTime: 0.15,
+  lift: 18,
+  speed: 120,
+  acceleration: 500,
+  turnRateDeg: 200,
+  keepDistance: 60,
+};
+
+export const SPIDERS = { giant: GIANT, small: SMALL } as const;
+export type SpiderKind = keyof typeof SPIDERS;
 
 const toV3 = (p: V3) => vec3.Vec3$Vec3(p.x, p.y, p.z);
 const fromV3 = (v: vec3.Vec3$): V3 => ({
@@ -86,17 +111,19 @@ export function config(s: SpiderSettings): SpiderConfig {
 }
 
 export const spawn = (
+  ground: Terrain,
   at: V3,
   heading: number,
   cfg: SpiderConfig,
-): SpiderState => spider.new$(toV3(at), heading, cfg);
+): SpiderState => spider.new_on(ground, toV3(at), heading, cfg);
 
 export const walk = (
   s: SpiderState,
   target: V3,
+  ground: Terrain,
   dt: number,
   cfg: SpiderConfig,
-): SpiderState => spider.walk(s, toV3(target), dt, cfg);
+): SpiderState => spider.walk_on(s, ground, toV3(target), dt, cfg);
 
 export function view(s: SpiderState, cfg: SpiderConfig): SpiderView {
   const pose = spider.pose(s, cfg);
@@ -117,8 +144,11 @@ export function view(s: SpiderState, cfg: SpiderConfig): SpiderView {
     }),
   );
   return {
+    size: spider.Config$Config$body_radius(cfg) / GIANT.bodyRadius,
     body: fromV3(spider.Pose$Pose$body(pose)),
     heading: spider.Pose$Pose$heading(pose),
+    pitch: spider.Pose$Pose$pitch(pose),
+    roll: spider.Pose$Pose$roll(pose),
     speed: spider.Spider$Spider$speed(s),
     legs,
   };

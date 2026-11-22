@@ -1,5 +1,5 @@
 import { GROUP_COLOR } from "./spider-draw";
-import { DEFAULT_SPIDER, type SpiderSettings } from "./spider-sim";
+import { SPIDERS, type SpiderKind, type SpiderSettings } from "./spider-sim";
 import { Stage } from "./stage";
 
 const UNITS: Partial<Record<keyof SpiderSettings, string>> = {
@@ -10,8 +10,10 @@ const UNITS: Partial<Record<keyof SpiderSettings, string>> = {
 
 const canvas = document.querySelector<HTMLCanvasElement>("#tank");
 if (canvas) {
-  const settings: SpiderSettings = { ...DEFAULT_SPIDER };
-  const stage = new Stage(canvas, settings, "canvas");
+  let kind: SpiderKind = "small";
+  const settings: SpiderSettings = { ...SPIDERS[kind] };
+  const hud = [...(document.getElementById("hud")?.children ?? [])];
+  const stage = new Stage(canvas, [settings], "canvas", hud);
   stage.skeleton = true;
   const boilAmount = stage.boil.amount;
 
@@ -39,11 +41,18 @@ if (canvas) {
   document.getElementById("boil")?.addEventListener("change", (e) => {
     stage.boil.amount = (e.target as HTMLInputElement).checked ? boilAmount || 0.9 : 0;
   });
-  document.getElementById("reset")?.addEventListener("click", () => {
-    Object.assign(settings, DEFAULT_SPIDER);
+  const load = () => {
+    Object.assign(settings, SPIDERS[kind]);
     stage.setSettings(settings);
     sync();
-  });
+  };
+  document.getElementById("reset")?.addEventListener("click", load);
+  for (const radio of document.querySelectorAll<HTMLInputElement>("input[name=kind]")) {
+    radio.addEventListener("change", () => {
+      kind = radio.value as SpiderKind;
+      load();
+    });
+  }
   const panel = document.getElementById("panel") as HTMLDetailsElement | null;
   if (panel && matchMedia("(max-width: 600px)").matches) panel.open = false;
   sync();

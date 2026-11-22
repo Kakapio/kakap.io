@@ -2,6 +2,7 @@ import * as rabbits from "@gleam/sim/sim/rabbits.mjs";
 import * as vec3 from "@gleam/sim/sim/vec3.mjs";
 import { toArray, fromArray } from "../gleam";
 import type { V3 } from "./camera";
+import type { Terrain } from "./terrain-sim";
 
 export type Herd = rabbits.Rabbit$[];
 export type RabbitConfig = rabbits.Config$;
@@ -58,7 +59,8 @@ export const spawn = (count: number, around: V3, spread: number): Herd =>
 
 export function step(
   herd: Herd,
-  spider: V3,
+  ground: Terrain,
+  spiders: V3[],
   bounds: Bounds,
   dt: number,
   cfg: RabbitConfig,
@@ -69,8 +71,12 @@ export function step(
     bounds.minZ,
     bounds.maxZ,
   );
-  return toArray(rabbits.step(fromArray(herd), toV3(spider), b, dt, cfg));
+  return toArray(
+    rabbits.step_around(fromArray(herd), ground, fromArray(spiders.map(toV3)), b, dt, cfg),
+  );
 }
+
+export const fearRadius = (cfg: RabbitConfig): number => rabbits.Config$Config$fear_radius(cfg);
 
 export const centroid = (herd: Herd): V3 =>
   fromV3(rabbits.centroid(fromArray(herd)));

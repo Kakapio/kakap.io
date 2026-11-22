@@ -1,5 +1,6 @@
 import gleam/list
 import sim/spider.{type Config, type Spider, Config, Planted}
+import sim/terrain.{Rock, Terrain}
 import sim/vec3.{type Vec3, Vec3}
 
 fn config() -> Config {
@@ -100,4 +101,37 @@ pub fn a_stopped_spider_settles_its_feet_test() {
   assert list.all(done.legs, fn(leg) { leg.step == Planted })
   assert spider.pose(done, config()).legs
     |> list.all(fn(leg) { vec3.ground_distance(leg.foot, leg.home) <. 7.5 })
+}
+
+pub fn feet_land_on_top_of_rocks_test() {
+  let ground =
+    Terrain([
+      Rock(center: Vec3(300.0, 0.0, 150.0), radius: 80.0, height: 50.0),
+      Rock(center: Vec3(500.0, 0.0, -150.0), radius: 70.0, height: 40.0),
+    ])
+  let target = Vec3(1200.0, 0.0, 0.0)
+  let check = fn(s: Spider) {
+    list.all(s.legs, fn(leg) {
+      case leg.step {
+        Planted -> {
+          let gap = leg.foot.y -. terrain.height(ground, at: leg.foot)
+          gap <. 0.01 && gap >. -0.01
+        }
+        _ -> True
+      }
+    })
+  }
+  let #(_, ok, stood_on_rock) =
+    list.fold(list.repeat(Nil, 400), #(start(), True, False), fn(acc, _) {
+      let #(s, ok, seen) = acc
+      let next =
+        spider.walk_on(s, ground, toward: target, dt:, config: config())
+      #(
+        next,
+        ok && check(next),
+        seen || list.any(next.legs, fn(leg) { leg.foot.y >. 10.0 }),
+      )
+    })
+  assert ok
+  assert stood_on_rock
 }

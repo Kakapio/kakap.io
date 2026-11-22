@@ -1,6 +1,7 @@
 import gleam/float
 import gleam/list
 import sim/rabbits.{type Config, type Rabbit, Bounds, Config}
+import sim/terrain.{Rock, Terrain}
 import sim/vec3.{type Vec3, Vec3}
 
 fn config() -> Config {
@@ -114,4 +115,52 @@ pub fn rabbits_stay_inside_the_bounds_test() {
     && r.position.z >=. -150.0
     && r.position.z <=. 150.0
   })
+}
+
+pub fn rabbits_run_around_rocks_test() {
+  let rock = Rock(center: Vec3(0.0, 0.0, 0.0), radius: 80.0, height: 50.0)
+  let ground = Terrain([rock])
+  let start = rabbits.herd(6, around: Vec3(-300.0, 0.0, 0.0), spread: 60.0)
+  let spider = Vec3(-450.0, 0.0, 0.0)
+  let #(_, ok) =
+    list.fold(list.repeat(Nil, 300), #(start, True), fn(acc, _) {
+      let #(herd, ok) = acc
+      let next =
+        rabbits.step_around(
+          herd,
+          ground,
+          from: [spider],
+          within: bounds,
+          dt: dt,
+          config: config(),
+        )
+      #(
+        next,
+        ok
+          && list.all(next, fn(r) {
+          vec3.ground_distance(r.position, rock.center) >=. rock.radius
+        }),
+      )
+    })
+  assert ok
+}
+
+pub fn rabbits_run_away_from_the_closest_of_two_spiders_test() {
+  let rabbit = rabbits.Rabbit(0, Vec3(0.0, 0.0, 0.0), vec3.zero, 0.0, 0.0, 0.0)
+  let near = Vec3(-100.0, 0.0, 0.0)
+  let far = Vec3(0.0, 0.0, 340.0)
+  let after =
+    list.fold(list.repeat(Nil, 30), [rabbit], fn(herd, _) {
+      rabbits.step_around(
+        herd,
+        terrain.flat,
+        from: [near, far],
+        within: bounds,
+        dt: dt,
+        config: config(),
+      )
+    })
+  let assert [r] = after
+  assert rabbits.is_fleeing(r)
+  assert r.position.x >. 40.0
 }
