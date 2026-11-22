@@ -1,0 +1,189 @@
+import type { Camera } from "./camera";
+import { type Boil, INK, line, taperedStroke } from "./ink";
+import type { RabbitView } from "./rabbit-sim";
+import type { Layers, Piece } from "./spider-draw";
+
+const FUR = "#ddd1b2";
+const FUR_SHADE = "#bcae8c";
+const TUNICS = [
+  "#7a3b2a",
+  "#4f5a3a",
+  "#3f4a5a",
+  "#6b5a2e",
+  "#5a3b4f",
+  "#2f4a45",
+  "#7a5a3a",
+  "#45374f",
+];
+
+/**
+ * Rabbit folk drawn as upright cut-outs that always face the screen, flipped to
+ * face the way they run. All sizes are in world units, scaled by perspective.
+ */
+export function rabbitLayers(
+  ctx: CanvasRenderingContext2D,
+  cam: Camera,
+  herd: RabbitView[],
+  time: number,
+  boil: Boil,
+): Layers {
+  const shadows = () => {
+    for (const r of herd) {
+      const p = cam.project(r.position);
+      ctx.fillStyle = INK.shadow;
+      ctx.globalAlpha = 1 - Math.min(0.6, r.lift / 30);
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y, 13 * p.scale, 5.5 * p.scale, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+  };
+  const pieces: Piece[] = herd.map((r) => ({
+    depth: cam.project(r.position).depth,
+    draw: () => drawRabbit(ctx, cam, r, time, boil),
+  }));
+  return { shadows, pieces };
+}
+
+function drawRabbit(
+  ctx: CanvasRenderingContext2D,
+  cam: Camera,
+  r: RabbitView,
+  time: number,
+  boil: Boil,
+) {
+  const base = cam.project({ ...r.position, y: r.lift });
+  const ahead = cam.project({
+    x: r.position.x + Math.cos(r.heading) * 10,
+    y: r.lift,
+    z: r.position.z + Math.sin(r.heading) * 10,
+  });
+  const face = ahead.x >= base.x ? 1 : -1;
+  const s = base.scale;
+  const seed = 500 + r.id * 40;
+  const at = (x: number, y: number, k: number) =>
+    boil.jitter({ x: base.x + x * face * s, y: base.y - y * s }, seed + k);
+  const outline = Math.max(1, 2.2 * s);
+  const airborne = r.lift > 1.5;
+
+  // Feet tuck under while airborne.
+  for (const side of [-1, 1]) {
+    const foot = at(side * 5 + (airborne ? 3 : 0), airborne ? 4 : 1.5, side);
+    ctx.fillStyle = INK.ink;
+    ctx.beginPath();
+    ctx.ellipse(foot.x, foot.y, 5 * s, 2.6 * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Body, with a tunic over the lower half.
+  const body = at(0, 15, 2);
+  ctx.save();
+  ctx.beginPath();
+  ctx.ellipse(body.x, body.y, 10.5 * s, 13.5 * s, 0, 0, Math.PI * 2);
+  ctx.fillStyle = FUR;
+  ctx.fill();
+  ctx.clip();
+  ctx.fillStyle = TUNICS[r.id % TUNICS.length]!;
+  ctx.fillRect(body.x - 12 * s, body.y - 3 * s, 24 * s, 20 * s);
+  ctx.restore();
+  ctx.beginPath();
+  ctx.ellipse(body.x, body.y, 10.5 * s, 13.5 * s, 0, 0, Math.PI * 2);
+  ctx.strokeStyle = INK.ink;
+  ctx.lineWidth = outline;
+  ctx.stroke();
+
+  // Arms: down and swinging when calm, thrown up in a panic.
+  for (const side of [-1, 1]) {
+    const swing = Math.sin(r.hop + side) * 3;
+    const hand = r.fleeing
+      ? at(side * 7 + 4, 33 + swing, 10 + side)
+      : at(side * 6 + 5, 10 + swing, 10 + side);
+    line(
+      ctx,
+      [at(side * 5 + 3, 21, 12 + side), hand],
+      INK.ink,
+      Math.max(1, 2.6 * s),
+    );
+  }
+
+  // Ears: an ink stroke with a fur stroke on top reads as an outlined ear.
+  const head = at(2, 33, 20);
+  const twitch = r.fleeing
+    ? 0
+    : Math.max(0, Math.sin(time * 1.3 + r.id * 2.1)) ** 12 * 0.5;
+  for (const [k, offset] of [
+    [0, -3],
+    [1, 3],
+  ] as const) {
+    const lean = r.fleeing
+      ? -1.1 - k * 0.15
+      : -0.12 + k * 0.22 - twitch * (k === 0 ? 1 : -1);
+    const root = { x: head.x + offset * face * s, y: head.y - 6 * s };
+    const len = 22 * s;
+    const tip = {
+      x: root.x + Math.sin(lean) * len * face,
+      y: root.y - Math.cos(lean) * len,
+    };
+    const mid = {
+      x: (root.x + tip.x) / 2 + face * 1.5 * s,
+      y: (root.y + tip.y) / 2,
+    };
+    taperedStroke(
+      ctx,
+      [
+        { ...root, w: 6.5 * s + outline },
+        { ...mid, w: 7 * s + outline },
+        { ...tip, w: 2 * s + outline },
+      ],
+      INK.ink,
+    );
+    taperedStroke(
+      ctx,
+      [
+        { ...root, w: 6.5 * s },
+        { ...mid, w: 7 * s },
+        { ...tip, w: 2 * s },
+      ],
+      k === 0 ? FUR_SHADE : FUR,
+    );
+  }
+
+  ctx.beginPath();
+  ctx.arc(head.x, head.y, 9.5 * s, 0, Math.PI * 2);
+  ctx.fillStyle = FUR;
+  ctx.fill();
+  ctx.strokeStyle = INK.ink;
+  ctx.lineWidth = outline;
+  ctx.stroke();
+
+  // Face: a nose on the snout side, and an eye that goes wide with fear.
+  const eye = { x: head.x + 4 * face * s, y: head.y - 1.5 * s };
+  if (r.fleeing) {
+    ctx.fillStyle = "#f6f0dc";
+    ctx.beginPath();
+    ctx.arc(eye.x, eye.y, 3.2 * s, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.lineWidth = Math.max(0.6, 1 * s);
+    ctx.stroke();
+  }
+  ctx.fillStyle = INK.ink;
+  ctx.beginPath();
+  ctx.arc(
+    eye.x,
+    eye.y,
+    Math.max(0.8, (r.fleeing ? 1.5 : 1.7) * s),
+    0,
+    Math.PI * 2,
+  );
+  ctx.fill();
+  ctx.fillStyle = "#8a3b2e";
+  ctx.beginPath();
+  ctx.arc(
+    head.x + 9 * face * s,
+    head.y + 2 * s,
+    Math.max(0.7, 1.5 * s),
+    0,
+    Math.PI * 2,
+  );
+  ctx.fill();
+}

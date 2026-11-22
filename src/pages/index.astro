@@ -3,19 +3,23 @@ import Base from "../layouts/Base.astro";
 ---
 
 <Base title="kakap.io">
-  <canvas id="tank" aria-hidden="true"></canvas>
+  <canvas id="stage" aria-hidden="true"></canvas>
   <main>
     <h1>kakap.io</h1>
-    <p>Work in progress. For now, one fish lives here. It follows your cursor, or your finger on a phone.</p>
+    <p>Work in progress. Something with long legs lives here. It follows your cursor, or your finger on a phone.</p>
     <nav>
-      <a href="/lab/ik">IK lab</a>
+      <a href="/lab/spider">Spider lab</a>
+      <a href="/lab/ik">Fish lab</a>
       <a href="https://github.com/Kakapio">GitHub</a>
     </nav>
   </main>
 </Base>
 
 <style>
-  #tank {
+  :global(body) {
+    background: #716a50;
+  }
+  #stage {
     position: fixed;
     inset: 0;
     width: 100%;
@@ -26,24 +30,30 @@ import Base from "../layouts/Base.astro";
   main {
     position: relative;
     display: grid;
-    gap: 16px;
+    gap: 14px;
     max-width: 40rem;
-    padding-top: calc(env(safe-area-inset-top, 0px) + clamp(32px, 12vh, 112px));
+    padding-top: calc(env(safe-area-inset-top, 0px) + clamp(28px, 9vh, 96px));
     padding-bottom: 32px;
     padding-left: max(24px, env(safe-area-inset-left, 0px));
     padding-right: max(24px, env(safe-area-inset-right, 0px));
+    color: #1d1910;
   }
   h1 {
     margin: 0;
-    font-size: clamp(2.5rem, 9vw, 4.5rem);
-    font-weight: 600;
-    letter-spacing: -0.02em;
+    font-family: var(--story);
+    font-weight: 400;
+    font-size: clamp(2.75rem, 10vw, 5rem);
+    line-height: 1;
+    letter-spacing: 0.01em;
   }
   p {
     margin: 0;
-    max-width: 36ch;
-    color: var(--muted);
-    line-height: 1.5;
+    max-width: 34ch;
+    font-family: var(--story);
+    font-style: italic;
+    font-size: 1.15rem;
+    line-height: 1.45;
+    color: #2a2418;
   }
   nav {
     display: flex;
@@ -52,8 +62,11 @@ import Base from "../layouts/Base.astro";
     font-family: var(--mono);
     font-size: 14px;
   }
+  nav a {
+    color: #6e2116;
+  }
 </style>
 
 <script>
-  import "../tank/home";
+  import "../stage/home";
 </script>

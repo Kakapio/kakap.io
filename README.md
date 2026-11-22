@@ -5,9 +5,11 @@ Personal site. A tank of fish, animated with inverse kinematics.
 ## Layout
 
 ```
-sim/          Gleam (JavaScript target). The behaviour: IK chain, FABRIK, steering, wander paths.
-src/tank/     TypeScript. Canvas drawing, input, and the adapter that calls the Gleam code.
-src/pages/    Astro pages. `/` is the home tank, `/lab/ik` is the IK sandbox.
+sim/          Gleam (JavaScript target). The behaviour: 2D chain + FABRIK (fish), 3D two-bone
+              leg IK + gait (spider), steering, wander paths and waypoints.
+src/stage/    TypeScript. The 2.5D spider scene: camera, ground scenery, ink drawing.
+src/tank/     TypeScript. The 2D fish tank.
+src/pages/    Astro pages. `/` is the spider scene, `/lab/spider` and `/lab/ik` are sandboxes.
 ```
 
 The renderer never changes sim state. Each frame it calls the sim, reads the joints back, and draws them.

@@ -1,5 +1,7 @@
 //// Smooth target paths for when nobody is pointing at the tank.
 
+import gleam/float
+import gleam/int
 import gleam_community/maths
 import sim/vec.{type Vec, Vec}
 
@@ -33,4 +35,17 @@ pub fn sweep(time: Float, root: Vec, reach: Float) -> Vec {
     root.x +. maths.sin(time *. 0.6) *. reach *. 0.85,
     root.y -. reach *. 0.55 +. maths.sin(time *. 1.2) *. reach *. 0.35,
   )
+}
+
+/// A repeatable pseudo-random point in the unit square for waypoint `index`.
+pub fn waypoint(index: Int) -> Vec {
+  let i = int.to_float(index)
+  Vec(
+    fraction(maths.sin(i *. 12.9898 +. 1.0) *. 43_758.5453),
+    fraction(maths.sin(i *. 78.233 +. 2.0) *. 12_543.1234),
+  )
+}
+
+fn fraction(x: Float) -> Float {
+  x -. float.floor(x)
 }

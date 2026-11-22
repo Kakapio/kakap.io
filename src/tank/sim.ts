@@ -1,9 +1,4 @@
-import {
-  List$isNonEmpty,
-  List$NonEmpty$first,
-  List$NonEmpty$rest,
-  type List,
-} from "@gleam/prelude.mjs";
+import { toArray } from "../gleam";
 import * as chain from "@gleam/sim/sim/chain.mjs";
 import * as fish from "@gleam/sim/sim/fish.mjs";
 import * as vec from "@gleam/sim/sim/vec.mjs";
@@ -26,16 +21,6 @@ export type Settings = {
 };
 
 const DEG = Math.PI / 180;
-
-function toArray<T>(list: List<T>): T[] {
-  const out: T[] = [];
-  let rest: List<T> | undefined = list;
-  while (rest !== undefined && List$isNonEmpty(rest)) {
-    out.push(List$NonEmpty$first(rest) as T);
-    rest = List$NonEmpty$rest(rest);
-  }
-  return out;
-}
 
 const toVec = (p: Point) => vec.Vec$Vec(p.x, p.y);
 const toPoint = (v: vec.Vec$): Point => ({

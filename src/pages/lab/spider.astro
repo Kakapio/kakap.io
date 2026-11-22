@@ -1,0 +1,80 @@
+---
+import Base from "../../layouts/Base.astro";
+import "../../styles/lab.css";
+
+const sliders = [
+  { key: "height", label: "Body height", min: 40, max: 260, step: 1 },
+  { key: "upper", label: "Upper leg", min: 80, max: 280, step: 1 },
+  { key: "lower", label: "Lower leg", min: 80, max: 300, step: 1 },
+  { key: "stance", label: "Stance width", min: 100, max: 340, step: 1 },
+  { key: "stepDistance", label: "Step distance", min: 20, max: 160, step: 1 },
+  { key: "stepTime", label: "Step time", min: 0.06, max: 0.6, step: 0.01 },
+  { key: "lift", label: "Foot lift", min: 0, max: 100, step: 1 },
+  { key: "speed", label: "Speed", min: 20, max: 400, step: 5 },
+  { key: "turnRateDeg", label: "Turn rate", min: 30, max: 360, step: 5 },
+  { key: "keepDistance", label: "Keeps away", min: 0, max: 400, step: 5 },
+];
+---
+
+<Base title="Spider Lab · kakap.io" description="A tall spider walking on two-bone IK legs with an alternating gait, in a 2.5D scene.">
+  <canvas id="tank" aria-label="A tall spider that walks toward your pointer or finger."></canvas>
+
+  <div id="hud">
+    <a class="back" href="/">← kakap.io</a>
+    <h1>Spider Lab</h1>
+    <p id="modeText">
+      Each leg is a two-bone IK chain from the hip to the ankle. The knee bends up and out. A foot stays planted until it
+      drifts a step distance from its rest ring. Then its group of four swings together, and the other group waits.
+    </p>
+    <dl id="stats"></dl>
+  </div>
+
+  <details id="panel" open>
+    <summary>Controls</summary>
+    <div class="rows">
+      <label class="check"><input type="checkbox" id="skeleton" checked /> Show IK bones and rest rings</label>
+      <label class="check"><input type="checkbox" id="boil" checked /> Hand-drawn line boil</label>
+      {
+        sliders.map((s) => (
+          <div class="slider">
+            <label for={`s-${s.key}`}>{s.label}</label>
+            <output for={`s-${s.key}`} />
+            <input type="range" id={`s-${s.key}`} data-key={s.key} min={s.min} max={s.max} step={s.step} />
+          </div>
+        ))
+      }
+      <button id="reset" type="button">Reset to defaults</button>
+      <p class="hint">Move the mouse, or touch and drag. With no input for 2.5 s, the spider wanders between waypoints.</p>
+    </div>
+  </details>
+</Base>
+
+<style is:global>
+  body {
+    background: #716a50;
+  }
+  #hud {
+    color: #1d1910;
+  }
+  #hud #modeText,
+  #stats dt {
+    color: #2e281c;
+  }
+  #stats dd {
+    color: #1d1910;
+  }
+  #stats .swatch {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    margin-right: 6px;
+    border: 1px solid #1d1910;
+  }
+  #hud .back {
+    color: #6e2116;
+  }
+</style>
+
+<script>
+  import "../../stage/lab";
+</script>
