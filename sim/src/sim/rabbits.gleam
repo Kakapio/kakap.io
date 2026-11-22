@@ -2,6 +2,9 @@
 //// a spider comes close, and panic spreads to rabbits near it. Panicked
 //// rabbits run away from the spider and away from each other, so the herd
 //// splits up. Fear fades once the spider is gone, and they huddle again.
+////
+//// A rabbit that stays scared for too long runs home and hides indoors. It
+//// comes out again once no spider is near its door.
 
 import gleam/float
 import gleam/int
@@ -31,8 +34,18 @@ pub type Bounds {
   Bounds(min_x: Float, max_x: Float, min_z: Float, max_z: Float)
 }
 
+/// Where a rabbit is with respect to its house.
+pub type Shelter {
+  Outside
+  /// Running for the door.
+  GoingHome
+  /// Inside the house for `time` seconds.
+  Indoors(time: Float)
+}
+
 /// `fear` runs from 0 (calm) to 1 (panic). `hop` is the hop cycle phase in
-/// radians.
+/// radians. `dread` is how long the rabbit has been scared, in seconds; it
+/// fades while the rabbit is calm. `home` is the index of its house.
 pub type Rabbit {
   Rabbit(
     id: Int,
@@ -41,6 +54,9 @@ pub type Rabbit {
     heading: Float,
     fear: Float,
     hop: Float,
+    dread: Float,
+    home: Int,
+    shelter: Shelter,
   )
 }
 
@@ -64,6 +80,22 @@ const rock_margin = 36.0
 /// The closest a rabbit's center comes to a rock's edge.
 const rock_pad = 12.0
 
+/// Seconds of fear that send a rabbit home.
+const dread_limit = 3.0
+
+/// Dread lost per second while calm.
+const dread_fade = 0.4
+
+/// The shortest stay indoors, in seconds.
+const indoor_time = 5.0
+
+/// A rabbit this close to its door goes in.
+const door_reach = 18.0
+
+/// A rabbit comes out when no spider is within this many fear radii of its
+/// door.
+const all_clear = 1.3
+
 /// `count` rabbits on a sunflower spiral of radius `spread` around `center`.
 pub fn herd(
   count: Int,
@@ -82,8 +114,33 @@ pub fn herd(
       a,
       0.0,
       0.0,
+      0.0,
+      0,
+      Outside,
     )
   })
+}
+
+/// Share `houses` houses out among the herd in order of id: with 6 rabbits
+/// and 2 houses, ids 0 to 2 live in house 0 and ids 3 to 5 in house 1.
+pub fn settle(rabbits: List(Rabbit), houses houses: Int) -> List(Rabbit) {
+  let count = int.max(1, list.length(rabbits))
+  list.map(rabbits, fn(r) { Rabbit(..r, home: r.id * houses / count) })
+}
+
+pub fn is_indoors(rabbit: Rabbit) -> Bool {
+  case rabbit.shelter {
+    Indoors(_) -> True
+    _ -> False
+  }
+}
+
+/// The center of the rabbits that are outside, or an error when all are in.
+pub fn outside_centroid(rabbits: List(Rabbit)) -> Result(Vec3, Nil) {
+  case list.filter(rabbits, fn(r) { !is_indoors(r) }) {
+    [] -> Error(Nil)
+    outside -> Ok(centroid(outside))
+  }
 }
 
 pub fn centroid(rabbits: List(Rabbit)) -> Vec3 {
@@ -126,44 +183,106 @@ pub fn step(
     rabbits,
     terrain.flat,
     from: [spider],
+    doors: [],
     within: bounds,
     dt:,
     config:,
   )
 }
 
-/// The same as `step`, with any number of spiders, and rabbits that run
-/// around the rocks on `ground`.
+/// The same as `step`, with any number of spiders, rabbits that run around
+/// the rocks on `ground`, and houses. `doors` holds the spot in front of each
+/// house's door, in house order.
 pub fn step_around(
   rabbits: List(Rabbit),
   ground: Terrain,
   from spiders: List(Vec3),
+  doors doors: List(Vec3),
   within bounds: Bounds,
   dt dt: Float,
   config config: Config,
 ) -> List(Rabbit) {
-  list.map(rabbits, step_one(_, rabbits, ground, spiders, bounds, dt, config))
+  list.map(rabbits, fn(rabbit) {
+    let door = list.drop(doors, rabbit.home) |> list.first
+    case rabbit.shelter {
+      Indoors(time) -> stay_in(rabbit, time, door, spiders, dt, config)
+      _ -> {
+        let outside =
+          list.filter(rabbits, fn(other) {
+            other.id != rabbit.id && !is_indoors(other)
+          })
+        step_one(rabbit, outside, ground, spiders, door, bounds, dt, config)
+      }
+    }
+  })
+}
+
+/// Wait indoors, then come out at the door once the coast is clear.
+fn stay_in(
+  rabbit: Rabbit,
+  time: Float,
+  door: Result(Vec3, Nil),
+  spiders: List(Vec3),
+  dt: Float,
+  config: Config,
+) -> Rabbit {
+  let time = time +. dt
+  case door {
+    Error(Nil) -> Rabbit(..rabbit, shelter: Outside)
+    Ok(door) -> {
+      let clear =
+        list.all(spiders, fn(spider) {
+          vec3.ground_distance(door, spider) >. config.fear_radius *. all_clear
+        })
+      case time >=. indoor_time && clear {
+        True ->
+          Rabbit(
+            ..rabbit,
+            position: door,
+            velocity: vec3.zero,
+            fear: 0.0,
+            dread: 0.0,
+            shelter: Outside,
+          )
+        False -> Rabbit(..rabbit, shelter: Indoors(time))
+      }
+    }
+  }
 }
 
 fn step_one(
   rabbit: Rabbit,
-  herd: List(Rabbit),
+  others: List(Rabbit),
   ground: Terrain,
   spiders: List(Vec3),
+  door: Result(Vec3, Nil),
   bounds: Bounds,
   dt: Float,
   config: Config,
 ) -> Rabbit {
-  let others = list.filter(herd, fn(other) { other.id != rabbit.id })
   let fear = feel(rabbit, others, spiders, dt, config)
+  let dread = case fear >. panic_level {
+    True -> rabbit.dread +. dt
+    False -> float.max(0.0, rabbit.dread -. dt *. dread_fade)
+  }
+  let shelter = case rabbit.shelter, door {
+    Outside, Ok(_) if dread >=. dread_limit -> GoingHome
+    shelter, _ -> shelter
+  }
   let separation = personal_space(rabbit, others, config.spacing)
   let group = case others {
     [] -> rabbit.position
     _ -> centroid(others)
   }
 
-  let desired = case fear >. panic_level {
-    True ->
+  let desired = case shelter, door, fear >. panic_level {
+    GoingHome, Ok(door), _ ->
+      vec3.flat(vec3.subtract(door, rabbit.position))
+      |> vec3.normalize
+      |> vec3.add(vec3.scale(separation, 0.4))
+      |> vec3.normalize
+      |> vec3.scale(config.run_speed)
+    _, _, True ->
       escape(rabbit, spiders)
       |> vec3.add(vec3.scale(
         vec3.normalize(vec3.flat(vec3.subtract(rabbit.position, group))),
@@ -173,7 +292,7 @@ fn step_one(
       |> vec3.add(vec3.scale(separation, 1.5))
       |> vec3.normalize
       |> vec3.scale(config.run_speed *. fear)
-    False -> {
+    _, _, False -> {
       let to_group = vec3.flat(vec3.subtract(group, rabbit.position))
       let pull =
         float.clamp(
@@ -188,12 +307,18 @@ fn step_one(
     }
   }
 
+  // A rabbit running home slides around rocks and its own house rather than
+  // being pushed back from them.
+  let dodge = case shelter {
+    GoingHome -> 0.3
+    _ -> 1.0
+  }
   let desired =
     desired
     |> vec3.add(walls(rabbit.position, bounds, config.run_speed))
     |> vec3.add(vec3.scale(
       terrain.avoid(ground, rabbit.position, rock_margin),
-      config.run_speed,
+      config.run_speed *. dodge,
     ))
   let velocity =
     vec3.move_toward(rabbit.velocity, desired, config.acceleration *. dt)
@@ -208,7 +333,33 @@ fn step_one(
   }
   let hop =
     rabbit.hop +. dt *. config.hop_rate *. vec3.sqrt(speed /. config.walk_speed)
-  Rabbit(rabbit.id, position, velocity, heading, fear, hop)
+  case shelter, door {
+    GoingHome, Ok(door) ->
+      case vec3.ground_distance(position, door) <. door_reach {
+        True ->
+          Rabbit(
+            ..rabbit,
+            position: door,
+            velocity: vec3.zero,
+            fear: fear,
+            dread: dread,
+            shelter: Indoors(0.0),
+          )
+        False ->
+          Rabbit(..rabbit, position:, velocity:, heading:, fear:, hop:, dread:)
+      }
+    _, _ ->
+      Rabbit(
+        ..rabbit,
+        position:,
+        velocity:,
+        heading:,
+        fear:,
+        hop:,
+        dread:,
+        shelter:,
+      )
+  }
 }
 
 /// The way away from the spiders, weighted toward the closest ones.

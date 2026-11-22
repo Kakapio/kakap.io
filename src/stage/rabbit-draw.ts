@@ -51,6 +51,7 @@ export class Emotes {
 
   update(herd: RabbitView[], time: number) {
     for (const r of herd) {
+      if (r.indoors) continue;
       const was = this.fleeing.get(r.id);
       if (was !== undefined && was !== r.fleeing) {
         this.shown.set(r.id, { mark: r.fleeing ? "!" : "?", since: time });
@@ -78,6 +79,7 @@ export function rabbitLayers(
   boil: Boil,
   emotes: Emotes,
 ): Layers {
+  herd = herd.filter((r) => !r.indoors);
   const shadows = () => {
     for (const r of herd) {
       const p = cam.project(r.position);

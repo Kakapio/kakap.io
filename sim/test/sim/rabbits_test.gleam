@@ -1,6 +1,6 @@
 import gleam/float
 import gleam/list
-import sim/rabbits.{type Config, type Rabbit, Bounds, Config}
+import sim/rabbits.{type Config, type Rabbit, Bounds, Config, Indoors, Outside}
 import sim/terrain.{Rock, Terrain}
 import sim/vec3.{type Vec3, Vec3}
 
@@ -80,8 +80,8 @@ pub fn an_approaching_spider_splits_the_huddle_test() {
 }
 
 pub fn fear_spreads_to_nearby_rabbits_test() {
-  let scared = rabbits.Rabbit(0, Vec3(0.0, 0.0, 0.0), vec3.zero, 0.0, 1.0, 0.0)
-  let calm = rabbits.Rabbit(1, Vec3(100.0, 0.0, 0.0), vec3.zero, 0.0, 0.0, 0.0)
+  let scared = rabbit_at(0, Vec3(0.0, 0.0, 0.0), 1.0)
+  let calm = rabbit_at(1, Vec3(100.0, 0.0, 0.0), 0.0)
   let assert [_, after] = run([scared, calm], far_away, 1)
   assert rabbits.is_fleeing(after)
 }
@@ -130,6 +130,7 @@ pub fn rabbits_run_around_rocks_test() {
           herd,
           ground,
           from: [spider],
+          doors: [],
           within: bounds,
           dt: dt,
           config: config(),
@@ -146,7 +147,7 @@ pub fn rabbits_run_around_rocks_test() {
 }
 
 pub fn rabbits_run_away_from_the_closest_of_two_spiders_test() {
-  let rabbit = rabbits.Rabbit(0, Vec3(0.0, 0.0, 0.0), vec3.zero, 0.0, 0.0, 0.0)
+  let rabbit = rabbit_at(0, Vec3(0.0, 0.0, 0.0), 0.0)
   let near = Vec3(-100.0, 0.0, 0.0)
   let far = Vec3(0.0, 0.0, 340.0)
   let after =
@@ -155,6 +156,7 @@ pub fn rabbits_run_away_from_the_closest_of_two_spiders_test() {
         herd,
         terrain.flat,
         from: [near, far],
+        doors: [],
         within: bounds,
         dt: dt,
         config: config(),
@@ -163,4 +165,67 @@ pub fn rabbits_run_away_from_the_closest_of_two_spiders_test() {
   let assert [r] = after
   assert rabbits.is_fleeing(r)
   assert r.position.x >. 40.0
+}
+
+fn rabbit_at(id: Int, at: Vec3, fear: Float) -> Rabbit {
+  rabbits.Rabbit(id, at, vec3.zero, 0.0, fear, 0.0, 0.0, 0, Outside)
+}
+
+fn run_home(
+  herd: List(Rabbit),
+  spider: Vec3,
+  door: Vec3,
+  frames: Int,
+) -> List(Rabbit) {
+  list.fold(list.repeat(Nil, frames), herd, fn(herd, _) {
+    rabbits.step_around(
+      herd,
+      terrain.flat,
+      from: [spider],
+      doors: [door],
+      within: bounds,
+      dt: dt,
+      config: config(),
+    )
+  })
+}
+
+pub fn a_rabbit_scared_for_long_runs_home_and_hides_test() {
+  let door = Vec3(-600.0, 0.0, 0.0)
+  // The spider chases the rabbit, keeping it scared until it reaches home.
+  let after =
+    list.fold(
+      list.repeat(Nil, 600),
+      [rabbit_at(0, Vec3(0.0, 0.0, 0.0), 0.0)],
+      fn(herd, _) {
+        let chaser = case herd {
+          [r, ..] -> vec3.add(r.position, Vec3(150.0, 0.0, 0.0))
+          [] -> far_away
+        }
+        run_home(herd, chaser, door, 1)
+      },
+    )
+  let assert [r] = after
+  assert rabbits.is_indoors(r)
+  assert r.position == door
+  assert rabbits.outside_centroid(after) == Error(Nil)
+}
+
+pub fn a_hiding_rabbit_comes_out_once_the_spider_leaves_test() {
+  let door = Vec3(-600.0, 0.0, 0.0)
+  let hiding = rabbits.Rabbit(..rabbit_at(0, door, 1.0), shelter: Indoors(0.0))
+  let still_in = run_home([hiding], Vec3(-500.0, 0.0, 0.0), door, 400)
+  assert list.all(still_in, rabbits.is_indoors)
+  let out = run_home(still_in, far_away, door, 10)
+  let assert [r] = out
+  assert r.shelter == Outside
+  assert r.dread == 0.0
+}
+
+pub fn settle_shares_houses_in_id_order_test() {
+  let homes =
+    rabbits.herd(6, around: Vec3(0.0, 0.0, 0.0), spread: 50.0)
+    |> rabbits.settle(houses: 2)
+    |> list.map(fn(r) { r.home })
+  assert homes == [0, 0, 0, 1, 1, 1]
 }

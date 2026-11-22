@@ -1,5 +1,6 @@
 import * as rabbits from "@gleam/sim/sim/rabbits.mjs";
 import * as vec3 from "@gleam/sim/sim/vec3.mjs";
+import { Result$isOk, Result$Ok$0 } from "@gleam/prelude.mjs";
 import { toArray, fromArray } from "../gleam";
 import type { V3 } from "./camera";
 import type { Terrain } from "./terrain-sim";
@@ -17,6 +18,8 @@ export type RabbitView = {
   fear: number;
   fleeing: boolean;
   hop: number;
+  indoors: boolean;
+  home: number;
 };
 
 export const DEFAULT_RABBITS = {
@@ -54,13 +57,15 @@ export function config(s: RabbitSettings): RabbitConfig {
   );
 }
 
-export const spawn = (count: number, around: V3, spread: number): Herd =>
-  toArray(rabbits.herd(count, toV3(around), spread));
+/** `houses` houses are shared out among the herd in order of id. */
+export const spawn = (count: number, around: V3, spread: number, houses: number): Herd =>
+  toArray(rabbits.settle(rabbits.herd(count, toV3(around), spread), houses));
 
 export function step(
   herd: Herd,
   ground: Terrain,
   spiders: V3[],
+  doors: V3[],
   bounds: Bounds,
   dt: number,
   cfg: RabbitConfig,
@@ -72,14 +77,17 @@ export function step(
     bounds.maxZ,
   );
   return toArray(
-    rabbits.step_around(fromArray(herd), ground, fromArray(spiders.map(toV3)), b, dt, cfg),
+    rabbits.step_around(fromArray(herd), ground, fromArray(spiders.map(toV3)), fromArray(doors.map(toV3)), b, dt, cfg),
   );
 }
 
 export const fearRadius = (cfg: RabbitConfig): number => rabbits.Config$Config$fear_radius(cfg);
 
-export const centroid = (herd: Herd): V3 =>
-  fromV3(rabbits.centroid(fromArray(herd)));
+/** The center of the rabbits that are outside, or null when they are all indoors. */
+export function outsideCentroid(herd: Herd): V3 | null {
+  const c = rabbits.outside_centroid(fromArray(herd));
+  return Result$isOk(c) ? fromV3(Result$Ok$0(c)!) : null;
+}
 
 export function view(herd: Herd, cfg: RabbitConfig): RabbitView[] {
   return herd.map((r) => {
@@ -93,6 +101,8 @@ export function view(herd: Herd, cfg: RabbitConfig): RabbitView[] {
       fear: rabbits.Rabbit$Rabbit$fear(r),
       fleeing: rabbits.is_fleeing(r),
       hop: rabbits.Rabbit$Rabbit$hop(r),
+      indoors: rabbits.is_indoors(r),
+      home: rabbits.Rabbit$Rabbit$home(r),
     };
   });
 }

@@ -121,7 +121,7 @@ function drawRock(
 }
 
 /** A point on the rock's surface: `t` from 0 (top) to 1 (base), at yaw `a`. */
-function surface(r: RockView, t: number, a: number): V3 {
+export function surface(r: RockView, t: number, a: number): V3 {
   const up = Math.cos((t * Math.PI) / 2);
   const out = Math.sin((t * Math.PI) / 2);
   return {
@@ -132,7 +132,7 @@ function surface(r: RockView, t: number, a: number): V3 {
 }
 
 /** Points on a half-ellipsoid, moved by (dx, dz) from the rock's center. */
-function dome(
+export function dome(
   r: RockView,
   radius: number,
   height: number,
@@ -154,7 +154,7 @@ function dome(
   return points;
 }
 
-function circle(center: V3, radius: number, y: number, steps: number): V3[] {
+export function circle(center: V3, radius: number, y: number, steps: number): V3[] {
   return Array.from({ length: steps }, (_, k) => {
     const a = (k / steps) * Math.PI * 2;
     return {
@@ -166,7 +166,7 @@ function circle(center: V3, radius: number, y: number, steps: number): V3[] {
 }
 
 /** The convex hull of `points`, counterclockwise on screen. */
-function hull<T extends Pt>(points: T[]): T[] {
+export function hull<T extends Pt>(points: T[]): T[] {
   const sorted = [...points].sort((a, b) => a.x - b.x || a.y - b.y);
   const turn = (o: Pt, a: Pt, b: Pt) =>
     (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
@@ -186,7 +186,7 @@ function hull<T extends Pt>(points: T[]): T[] {
   return [...half(sorted), ...half(sorted.reverse())];
 }
 
-function fill(ctx: CanvasRenderingContext2D, points: Pt[], color: string) {
+export function fill(ctx: CanvasRenderingContext2D, points: Pt[], color: string) {
   ctx.fillStyle = color;
   ctx.beginPath();
   points.forEach((p, k) => (k ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));

@@ -2,12 +2,13 @@ import { Pointer, runLoop } from "../tank/canvas";
 import { Camera, type V3 } from "./camera";
 import { Ground } from "./ground";
 import { Boil, line } from "./ink";
+import { houseLayers } from "./house-draw";
 import { Emotes, rabbitLayers } from "./rabbit-draw";
 import * as bunnies from "./rabbit-sim";
 import { rockLayers } from "./rock-draw";
 import { type Layers, spiderLayers } from "./spider-draw";
 import * as sim from "./spider-sim";
-import { heightAt, type Land, pick, rockUnder, scatterRocks } from "./terrain-sim";
+import { HOUSE_RADIUS, heightAt, type Land, pick, rockUnder, scatterRocks } from "./terrain-sim";
 
 export type Input = "window" | "canvas";
 
@@ -21,6 +22,12 @@ const PAGE_CONTROLS = "a, button, input, select, textarea, summary, label, detai
 const WAYPOINT_SECONDS = 7;
 
 const RABBIT_COUNT = 6;
+
+/** Where the houses stand, as fractions of the screen width and height. House 0 is the named rabbits' house. */
+const HOUSE_SPOTS = [
+  { u: 0.17, v: 0.62 },
+  { u: 0.84, v: 0.46 },
+];
 
 /** One spider in the scene, with its own settings and target. */
 type Walker = {
@@ -88,7 +95,7 @@ export class Stage {
     });
     this.fitFear();
     const nest = cam.groundAt(cam.width * 0.25, cam.height * 0.8) ?? origin;
-    this.herd = bunnies.spawn(RABBIT_COUNT, nest, 70);
+    this.herd = bunnies.spawn(RABBIT_COUNT, nest, 70, HOUSE_SPOTS.length);
     if (matchMedia("(prefers-reduced-motion: reduce)").matches) this.boil.amount = 0;
   }
 
@@ -136,7 +143,8 @@ export class Stage {
       s.view = sim.view(s.state, s.cfg);
     });
     const threats = this.spiders.map((s) => s.view.body);
-    this.herd = bunnies.step(this.herd, this.land.ground, threats, this.bounds, dt, this.rabbitCfg);
+    const doors = this.land.houses.map((h) => h.door);
+    this.herd = bunnies.step(this.herd, this.land.ground, threats, doors, this.bounds, dt, this.rabbitCfg);
     this.boil.tick(time);
     const rabbits = bunnies.view(this.herd, this.rabbitCfg);
     this.emotes.update(rabbits, time);
@@ -146,6 +154,7 @@ export class Stage {
     const layers = [
       this.markLayers(time),
       rockLayers(ctx, cam, this.land.rocks, this.boil),
+      houseLayers(ctx, cam, this.land.houses, this.occupants(rabbits), time, this.boil),
       ...this.spiders.map((s) =>
         spiderLayers(ctx, cam, s.view, { boil: this.boil, time, skeleton: this.skeleton, eyeHue: s.eyeHue }),
       ),
@@ -187,7 +196,8 @@ export class Stage {
   private wanderTarget(i: number, time: number, fallback: V3): V3 {
     const n = this.spiders.length;
     const turn = Math.floor(time / WAYPOINT_SECONDS);
-    if (turn % (n + 1) === i + 1) return bunnies.centroid(this.herd);
+    const huddle = bunnies.outsideCentroid(this.herd);
+    if (huddle && turn % (n + 1) === i + 1) return huddle;
     const { u, v } = sim.waypoint(turn * n + i);
     const cam = this.camera;
     return cam.groundAt(cam.width * (0.15 + 0.7 * u), cam.height * (0.38 + 0.52 * v)) ?? fallback;
@@ -203,7 +213,27 @@ export class Stage {
     this.camera.resize(width, height);
     this.ground.render(this.camera, dpr);
     this.bounds = this.visibleBounds();
-    this.land = scatterRocks((r) => !this.covers(r));
+    const homes = HOUSE_SPOTS.map((spot) => this.houseSpot(spot.u, spot.v));
+    this.land = scatterRocks((r) => !this.covers(r), homes);
+  }
+
+  /** The ground point at screen fractions (u, v), moved toward the middle until the whole house fits on screen. */
+  private houseSpot(u: number, v: number): V3 {
+    const cam = this.camera;
+    const origin = { x: 0, y: 0, z: 0 };
+    for (let k = 0; k < 20; k++) {
+      const at = cam.groundAt(cam.width * u, cam.height * v) ?? origin;
+      const left = cam.project({ ...at, x: at.x - HOUSE_RADIUS * 1.6 }).x;
+      const right = cam.project({ ...at, x: at.x + HOUSE_RADIUS * 1.6 }).x;
+      if (left >= 0 && right <= cam.width) return at;
+      u += (0.5 - u) * 0.15;
+    }
+    return cam.groundAt(cam.width * u, cam.height * v) ?? origin;
+  }
+
+  /** How many rabbits are inside each house. */
+  private occupants(rabbits: bunnies.RabbitView[]): number[] {
+    return this.land.houses.map((h) => rabbits.filter((r) => r.indoors && r.home === h.index).length);
   }
 
   /** True when the rock would sit under one of the `keepClear` elements, such as page text. */
