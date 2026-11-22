@@ -119,7 +119,7 @@ pub fn rabbits_stay_inside_the_bounds_test() {
 
 pub fn rabbits_run_around_rocks_test() {
   let rock = terrain.rock(Vec3(0.0, 0.0, 0.0), 80.0, 50.0)
-  let ground = Terrain([rock])
+  let ground = Terrain([rock], [])
   let start = rabbits.herd(6, around: Vec3(-300.0, 0.0, 0.0), spread: 60.0)
   let spider = Vec3(-450.0, 0.0, 0.0)
   let #(_, ok) =
@@ -228,4 +228,65 @@ pub fn settle_shares_houses_in_id_order_test() {
     |> rabbits.settle(houses: 2)
     |> list.map(fn(r) { r.home })
   assert homes == [0, 0, 0, 1, 1, 1]
+}
+
+pub fn a_rabbit_crosses_a_crevasse_at_the_bridge_to_get_home_test() {
+  // The crevasse runs along the x axis, with a bridge at x = 100.
+  let crack =
+    terrain.Crevasse(
+      Vec3(-400.0, 0.0, 0.0),
+      Vec3(400.0, 0.0, 0.0),
+      115.0,
+      170.0,
+      500.0,
+    )
+  let ground = Terrain([], [crack])
+  let door = Vec3(-150.0, 0.0, 250.0)
+  let runner =
+    rabbits.Rabbit(
+      0,
+      Vec3(-200.0, 0.0, -200.0),
+      vec3.zero,
+      0.0,
+      1.0,
+      0.0,
+      5.0,
+      0,
+      rabbits.GoingHome,
+    )
+  let #(after, safe, crossed) =
+    list.fold(list.repeat(Nil, 600), #([runner], True, False), fn(acc, _) {
+      let #(herd, safe, crossed) = acc
+      let next =
+        rabbits.step_around(
+          herd,
+          ground,
+          from: [far_away],
+          doors: [door],
+          within: bounds,
+          dt: dt,
+          config: config(),
+        )
+      let assert [r] = next
+      let over_gap = terrain.height(ground, at: r.position) <. 0.0
+      let on_bridge = float.absolute_value(r.position.x -. 100.0) <. 20.001
+      #(next, safe && { !over_gap || on_bridge }, crossed || over_gap)
+    })
+  let assert [r] = after
+  assert safe
+  assert crossed
+  // It went in, and came out at its door once the coast was clear.
+  assert r.position == door
+}
+
+pub fn a_rabbit_stays_set_on_going_home_once_it_decides_test() {
+  let door = Vec3(-900.0, 0.0, 0.0)
+  let dreading =
+    rabbits.Rabbit(..rabbit_at(0, Vec3(0.0, 0.0, 0.0), 1.0), dread: 3.0)
+  // The spider is near enough to keep it scared for this one frame.
+  let assert [r] = run_home([dreading], Vec3(100.0, 0.0, 0.0), door, 1)
+  assert r.shelter == rabbits.GoingHome
+  // It keeps running home after the spider leaves and it calms down.
+  let assert [later] = run_home([r], far_away, door, 120)
+  assert later.shelter == rabbits.GoingHome
 }

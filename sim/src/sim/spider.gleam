@@ -100,8 +100,8 @@ pub fn new_on(
   let legs =
     list.flat_map([Left, Right], fn(side) {
       list.map([0, 1, 2, 3], fn(index) {
-        let foot =
-          terrain.place(ground, home(position, heading, side, index, config))
+        let spot = home(position, heading, side, index, config)
+        let foot = terrain.foothold(ground, spot, toward: spot)
         Leg(side, index, foot, Planted)
       })
     })
@@ -119,7 +119,8 @@ pub fn walk(
   walk_on(spider, terrain.flat, toward: target, dt:, config:)
 }
 
-/// The same as `walk`, on uneven `ground`. Feet land on the ground surface.
+/// The same as `walk`, on uneven `ground`. Feet land on the ground surface,
+/// and on the rims of a crevasse, never inside it.
 pub fn walk_on(
   spider: Spider,
   ground: Terrain,
@@ -283,8 +284,10 @@ fn swing(
 ) -> Leg {
   case leg.step {
     Planted -> leg
-    Swinging(from, _, progress) -> {
-      let to = landing(leg, ground, position, heading, velocity, config)
+    Swinging(from, planned, progress) -> {
+      // The foot keeps to the side of a crevasse that it set off for.
+      let wanted = landing(leg, position, heading, velocity, config)
+      let to = terrain.foothold(ground, wanted, toward: planned)
       let progress = progress +. dt /. config.step_time
       case progress >=. 1.0 {
         True -> Leg(..leg, foot: to, step: Planted)
@@ -308,18 +311,27 @@ fn start_steps(
   speed: Float,
   config: Config,
 ) -> List(Leg) {
-  let drift = fn(leg: Leg) {
-    vec3.ground_distance(
-      leg.foot,
-      home(position, heading, leg.side, leg.index, config),
-    )
+  // A rest spot over a crevasse counts as the foothold beside it, so a foot
+  // that stands on the rim is not seen as out of place.
+  let rest = fn(leg: Leg) {
+    home(position, heading, leg.side, leg.index, config)
   }
+  // A foot over a crevasse goes to the rim ahead, on the side where its rest
+  // spot will be a little later. This keeps the trailing feet in reach.
+  let ahead = fn(leg: Leg) {
+    vec3.add(rest(leg), vec3.scale(velocity, look_ahead))
+  }
+  let hold = fn(leg: Leg) {
+    terrain.foothold(ground, rest(leg), toward: ahead(leg))
+  }
+  let drift = fn(leg: Leg) { vec3.ground_distance(leg.foot, hold(leg)) }
   let lift_off = fn(leg: Leg) {
+    let wanted = landing(leg, position, heading, velocity, config)
     Leg(
       ..leg,
       step: Swinging(
         leg.foot,
-        landing(leg, ground, position, heading, velocity, config),
+        terrain.foothold(ground, wanted, toward: ahead(leg)),
         0.0,
       ),
     )
@@ -333,7 +345,14 @@ fn start_steps(
   case list.find(legs, is_swinging) |> result.map(group) {
     Ok(_) ->
       list.map(legs, fn(leg) {
-        case !is_swinging(leg) && drift(leg) >. config.step_distance *. 2.0 {
+        // A foot left far behind steps out of turn. A foot whose rest spot
+        // is over a crevasse waits for its turn: its foothold can jump from
+        // one rim to the other.
+        case
+          !is_swinging(leg)
+          && drift(leg) >. config.step_distance *. 2.0
+          && hold(leg) == rest(leg)
+        {
           True -> lift_off(leg)
           False -> leg
         }
@@ -368,11 +387,15 @@ fn start_steps(
   }
 }
 
-/// Where a swinging foot lands: its rest spot, moved ahead by one step's worth
-/// of travel so it lands in front and has room to drift back.
+/// How far ahead in time a foot looks to choose a side of a crevasse, in
+/// seconds.
+const look_ahead = 0.25
+
+/// Where a swinging foot wants to land: its rest spot, moved ahead by one
+/// step's worth of travel so it lands in front and has room to drift back.
+/// The terrain then finds solid ground at or near this spot.
 fn landing(
   leg: Leg,
-  ground: Terrain,
   position: Vec3,
   heading: Float,
   velocity: Vec3,
@@ -382,7 +405,6 @@ fn landing(
     home(position, heading, leg.side, leg.index, config),
     vec3.scale(velocity, config.step_time),
   )
-  |> terrain.place(ground, _)
 }
 
 fn arc(from: Vec3, to: Vec3, progress: Float, lift: Float) -> Vec3 {

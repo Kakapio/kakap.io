@@ -1,5 +1,6 @@
 import { Pointer, runLoop } from "../tank/canvas";
 import { Camera, type V3 } from "./camera";
+import { crevasseLayers } from "./crevasse-draw";
 import { Ground } from "./ground";
 import { Boil, line } from "./ink";
 import { houseLayers } from "./house-draw";
@@ -8,7 +9,18 @@ import * as bunnies from "./rabbit-sim";
 import { rockLayers } from "./rock-draw";
 import { type Layers, spiderLayers } from "./spider-draw";
 import * as sim from "./spider-sim";
-import { HOUSE_RADIUS, heightAt, type Land, pick, rockUnder, scatterRocks } from "./terrain-sim";
+import {
+  BOULDER_RADIUS,
+  CREVASSE_WIDTH,
+  type CrevasseSpot,
+  distanceToLine,
+  HOUSE_RADIUS,
+  heightAt,
+  type Land,
+  pick,
+  rockUnder,
+  scatterRocks,
+} from "./terrain-sim";
 
 export type Input = "window" | "canvas";
 
@@ -27,6 +39,32 @@ const RABBIT_COUNT = 6;
 const HOUSE_SPOTS = [
   { u: 0.17, v: 0.62 },
   { u: 0.84, v: 0.46 },
+];
+
+/** Where the rabbits start, as fractions of the screen width and height. */
+const NEST = { u: 0.25, v: 0.8 };
+
+/**
+ * Lines for the crevasse to follow, as fractions of the screen width and
+ * height, in order of choice. `bridge` is how far along the line the bridge
+ * crosses. The first lies between the nest and house 1, so the rabbits that
+ * live there go home over the bridge.
+ */
+const CREVASSE_SPOTS = [
+  { from: { u: 0.4, v: 0.86 }, to: { u: 0.66, v: 0.54 }, bridge: 0.62 },
+  { from: { u: 0.36, v: 0.9 }, to: { u: 0.6, v: 0.62 }, bridge: 0.6 },
+  { from: { u: 0.3, v: 0.9 }, to: { u: 0.72, v: 0.7 }, bridge: 0.55 },
+];
+
+/** Centers for the big boulder, as fractions of the screen width and height, in order of choice. */
+const BOULDER_SPOTS = [
+  { u: 0.8, v: 0.76 },
+  { u: 0.5, v: 0.44 },
+  { u: 0.62, v: 0.84 },
+  { u: 0.5, v: 0.6 },
+  { u: 0.8, v: 0.86 },
+  { u: 0.78, v: 0.92 },
+  { u: 0.5, v: 0.93 },
 ];
 
 /** One spider in the scene, with its own settings and target. */
@@ -94,7 +132,7 @@ export class Stage {
       return { settings, cfg, exact, state, view: sim.view(state, cfg), target: at, eyeHue };
     });
     this.fitFear();
-    const nest = cam.groundAt(cam.width * 0.25, cam.height * 0.8) ?? origin;
+    const nest = cam.groundAt(cam.width * NEST.u, cam.height * NEST.v) ?? origin;
     this.herd = bunnies.spawn(RABBIT_COUNT, nest, 70, HOUSE_SPOTS.length);
     if (matchMedia("(prefers-reduced-motion: reduce)").matches) this.boil.amount = 0;
   }
@@ -152,6 +190,7 @@ export class Stage {
     const ctx = this.ctx;
     this.ground.drawBase(ctx, cam);
     const layers = [
+      crevasseLayers(ctx, cam, this.land.crevasses, this.boil),
       this.markLayers(time),
       rockLayers(ctx, cam, this.land.rocks, this.boil),
       houseLayers(ctx, cam, this.land.houses, this.occupants(rabbits), time, this.boil),
@@ -214,7 +253,73 @@ export class Stage {
     this.ground.render(this.camera, dpr);
     this.bounds = this.visibleBounds();
     const homes = HOUSE_SPOTS.map((spot) => this.houseSpot(spot.u, spot.v));
-    this.land = scatterRocks((r) => !this.covers(r), homes);
+    const crevasse = this.crevasseSpot(homes);
+    this.land = scatterRocks((r) => !this.covers(r), homes, crevasse, this.boulderSpot(homes, crevasse));
+  }
+
+  private groundAt(spot: { u: number; v: number }): V3 {
+    const cam = this.camera;
+    return cam.groundAt(cam.width * spot.u, cam.height * spot.v) ?? { x: 0, y: 0, z: 0 };
+  }
+
+  /** True when a circle of `radius` on the ground at `p` is clear of the houses, their door paths and the nest. */
+  private isOpen(p: V3, radius: number, homes: V3[]): boolean {
+    const nest = this.groundAt(NEST);
+    // A hill reaches from its door spot back to about its radius behind it.
+    const hills = homes.map((d) => ({ ...d, z: d.z + HOUSE_RADIUS * 0.45 }));
+    return (
+      Math.hypot(p.x - nest.x, p.z - nest.z) > radius + 110 &&
+      hills.every((h) => Math.hypot(p.x - h.x, p.z - h.z) > radius + HOUSE_RADIUS * 0.95) &&
+      homes.every((d) => distanceToLine(p, d, { ...d, z: d.z - 110 }) > radius + 50)
+    );
+  }
+
+  /**
+   * The first crevasse line with a long enough part that is on screen and
+   * clear of the page text, the houses and the nest. The crevasse follows
+   * that part of the line.
+   */
+  private crevasseSpot(homes: V3[]): CrevasseSpot | null {
+    const cam = this.camera;
+    const half = CREVASSE_WIDTH / 2;
+    const steps = 16;
+    for (const spot of CREVASSE_SPOTS) {
+      const [from, to] = [this.groundAt(spot.from), this.groundAt(spot.to)];
+      const at = (k: number): V3 => ({
+        x: from.x + ((to.x - from.x) * k) / steps,
+        y: 0,
+        z: from.z + ((to.z - from.z) * k) / steps,
+      });
+      const fits = (p: V3) => {
+        const on = cam.project(p);
+        const onScreen = on.x > 0 && on.x < cam.width && on.y > 0 && on.y < cam.height;
+        return onScreen && this.isOpen(p, half, homes) && !this.covers({ center: p, radius: half, height: 0 });
+      };
+      // The longest run of points along the line that all fit.
+      let best = { first: 0, count: 0 };
+      let run = { first: 0, count: 0 };
+      for (let k = 0; k <= steps; k++) {
+        run = fits(at(k)) ? { first: run.count ? run.first : k, count: run.count + 1 } : { first: 0, count: 0 };
+        if (run.count > best.count) best = run;
+      }
+      const [start, end] = [at(best.first), at(best.first + best.count - 1)];
+      if (best.count > 1 && Math.hypot(end.x - start.x, end.z - start.z) > CREVASSE_WIDTH * 3)
+        return { from: start, to: end, bridge: spot.bridge };
+    }
+    return null;
+  }
+
+  /** The first boulder spot that is clear of the page text, the houses, the nest and the crevasse. */
+  private boulderSpot(homes: V3[], crevasse: CrevasseSpot | null): V3 | null {
+    for (const spot of BOULDER_SPOTS) {
+      const at = this.groundAt(spot);
+      const clear =
+        this.isOpen(at, BOULDER_RADIUS, homes) &&
+        !this.covers({ center: at, radius: BOULDER_RADIUS, height: 0 }) &&
+        (!crevasse || distanceToLine(at, crevasse.from, crevasse.to) > BOULDER_RADIUS + CREVASSE_WIDTH / 2 + 40);
+      if (clear) return at;
+    }
+    return null;
   }
 
   /** The ground point at screen fractions (u, v), moved toward the middle until the house fits on screen. */

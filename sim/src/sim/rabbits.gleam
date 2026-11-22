@@ -191,7 +191,7 @@ pub fn step(
 }
 
 /// The same as `step`, with any number of spiders, rabbits that run around
-/// the rocks on `ground`, and houses. `doors` holds the spot in front of each
+/// the rocks and crevasses on `ground`, and houses. `doors` holds the spot in front of each
 /// house's door, in house order.
 pub fn step_around(
   rabbits: List(Rabbit),
@@ -277,7 +277,9 @@ fn step_one(
 
   let desired = case shelter, door, fear >. panic_level {
     GoingHome, Ok(door), _ ->
-      vec3.flat(vec3.subtract(door, rabbit.position))
+      terrain.route(ground, from: rabbit.position, to: door)
+      |> vec3.subtract(rabbit.position)
+      |> vec3.flat
       |> vec3.normalize
       |> vec3.add(vec3.scale(separation, 0.4))
       |> vec3.normalize
@@ -300,8 +302,13 @@ fn step_one(
           min: 0.0,
           max: 1.0,
         )
+      // The way to the group goes over the bridge when a crevasse is between.
+      let way =
+        terrain.route(ground, from: rabbit.position, to: group)
+        |> vec3.subtract(rabbit.position)
+        |> vec3.flat
       vec3.add(
-        vec3.scale(vec3.normalize(to_group), config.walk_speed *. pull),
+        vec3.scale(vec3.normalize(way), config.walk_speed *. pull),
         vec3.scale(separation, config.walk_speed *. 1.5),
       )
     }
@@ -346,7 +353,16 @@ fn step_one(
             shelter: Indoors(0.0),
           )
         False ->
-          Rabbit(..rabbit, position:, velocity:, heading:, fear:, hop:, dread:)
+          Rabbit(
+            ..rabbit,
+            position:,
+            velocity:,
+            heading:,
+            fear:,
+            hop:,
+            dread:,
+            shelter: GoingHome,
+          )
       }
     _, _ ->
       Rabbit(

@@ -105,10 +105,13 @@ pub fn a_stopped_spider_settles_its_feet_test() {
 
 pub fn feet_land_on_top_of_rocks_test() {
   let ground =
-    Terrain([
-      terrain.rock(Vec3(300.0, 0.0, 150.0), 80.0, 50.0),
-      terrain.rock(Vec3(500.0, 0.0, -150.0), 70.0, 40.0),
-    ])
+    Terrain(
+      [
+        terrain.rock(Vec3(300.0, 0.0, 150.0), 80.0, 50.0),
+        terrain.rock(Vec3(500.0, 0.0, -150.0), 70.0, 40.0),
+      ],
+      [],
+    )
   let target = Vec3(1200.0, 0.0, 0.0)
   let check = fn(s: Spider) {
     list.all(s.legs, fn(leg) {
@@ -134,4 +137,86 @@ pub fn feet_land_on_top_of_rocks_test() {
     })
   assert ok
   assert stood_on_rock
+}
+
+fn small() -> Config {
+  Config(
+    height: 55.0,
+    body_radius: 10.0,
+    upper: 75.0,
+    lower: 85.0,
+    tip: 18.0,
+    stance: 95.0,
+    step_distance: 32.0,
+    step_time: 0.15,
+    lift: 18.0,
+    speed: 120.0,
+    acceleration: 500.0,
+    turn_rate: 3.5,
+    keep_distance: 0.0,
+  )
+}
+
+/// A small spider walks to `target` over a crevasse along the x axis. Returns
+/// whether every frame kept the gait rules, and whether the body was ever
+/// over the gap.
+fn cross_crevasse(from: Vec3, target: Vec3, frames: Int) -> #(Bool, Bool) {
+  let crack =
+    terrain.Crevasse(
+      Vec3(-400.0, 0.0, 0.0),
+      Vec3(400.0, 0.0, 0.0),
+      115.0,
+      170.0,
+      -1.0,
+    )
+  let ground = Terrain([], [crack])
+  // Facing the target, so the walk has no sharp turn.
+  let first =
+    spider.new_on(ground, from, vec3.yaw(vec3.subtract(target, from)), small())
+  let #(_, ok, over) =
+    list.fold(list.repeat(Nil, frames), #(first, True, False), fn(acc, _) {
+      let #(s, ok, over) = acc
+      let next = spider.walk_on(s, ground, toward: target, dt:, config: small())
+      let pose = spider.pose(next, small())
+      let on_solid_ground =
+        list.all(next.legs, fn(leg) {
+          case leg.step {
+            Planted -> terrain.height(ground, at: leg.foot) == 0.0
+            spider.Swinging(_, to, _) -> terrain.height(ground, at: to) == 0.0
+          }
+        })
+      let no_slide =
+        list.zip(s.legs, next.legs)
+        |> list.all(fn(pair) {
+          case { pair.0 }.step, { pair.1 }.step {
+            Planted, Planted -> { pair.0 }.foot == { pair.1 }.foot
+            _, _ -> True
+          }
+        })
+      let one_group =
+        next.legs
+        |> list.filter(spider.is_swinging)
+        |> list.map(spider.group)
+        |> list.unique
+        |> list.length
+        <= 1
+      let in_reach = list.all(pose.legs, fn(leg) { !leg.stretched })
+      let level = pose.body.y >=. 54.9
+      #(
+        next,
+        ok && on_solid_ground && no_slide && one_group && in_reach && level,
+        over || terrain.height(ground, at: next.position) <. -100.0,
+      )
+    })
+  #(ok, over)
+}
+
+pub fn a_spider_straddles_a_crevasse_and_never_steps_in_it_test() {
+  // Straight across, at a slant, and along the gap to stop over it.
+  assert cross_crevasse(Vec3(0.0, 0.0, -250.0), Vec3(20.0, 0.0, 300.0), 420)
+    == #(True, True)
+  assert cross_crevasse(Vec3(-250.0, 0.0, -200.0), Vec3(250.0, 0.0, 200.0), 500)
+    == #(True, True)
+  assert cross_crevasse(Vec3(-200.0, 0.0, -150.0), Vec3(60.0, 0.0, 0.0), 500)
+    == #(True, True)
 }

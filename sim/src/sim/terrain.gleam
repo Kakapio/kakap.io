@@ -8,6 +8,9 @@
 //// with no edge. Its near side is steep and rounded, and a wall that leans
 //// back slices it, like the front of a hobbit hole. The ground in front of
 //// the wall is flat.
+////
+//// A crevasse is a long, deep crack in the ground with jagged rims. Its
+//// surface is below zero. It can have one bridge across it.
 
 import gleam/float
 import gleam/int
@@ -27,11 +30,18 @@ pub fn rock(center: Vec3, radius: Float, height: Float) -> Rock {
   Rock(center, radius, height, radius)
 }
 
-pub type Terrain {
-  Terrain(rocks: List(Rock))
+/// A crack along the line from `from` to `to`, with a point at each end.
+/// `width` is the widest the gap gets. `bridge` is how far along the line a
+/// bridge crosses it. A negative `bridge` means no bridge.
+pub type Crevasse {
+  Crevasse(from: Vec3, to: Vec3, width: Float, depth: Float, bridge: Float)
 }
 
-pub const flat = Terrain([])
+pub type Terrain {
+  Terrain(rocks: List(Rock), crevasses: List(Crevasse))
+}
+
+pub const flat = Terrain([], [])
 
 /// Rocks on a jittered grid of `cell`-wide squares that covers the rectangle.
 /// About half the cells get a rock. The same inputs give the same rocks.
@@ -65,14 +75,218 @@ pub fn scatter(
         }
       })
     })
-  Terrain(rocks)
+  Terrain(rocks, [])
 }
 
 /// The height of the ground surface at `p`, ignoring `p.y`.
 pub fn height(terrain: Terrain, at p: Vec3) -> Float {
-  list.fold(terrain.rocks, 0.0, fn(top, rock) {
-    float.max(top, rock_height(rock, p))
+  let low =
+    list.fold(terrain.crevasses, 0.0, fn(low, c) {
+      float.min(low, crevasse_height(c, p))
+    })
+  case low <. 0.0 {
+    True -> low
+    False ->
+      list.fold(terrain.rocks, 0.0, fn(top, rock) {
+        float.max(top, rock_height(rock, p))
+      })
+  }
+}
+
+/// The height of the crevasse's surface at `p`: 0 outside it, and down to
+/// minus its depth inside. The walls slope in to a flat bottom.
+pub fn crevasse_height(c: Crevasse, p: Vec3) -> Float {
+  let #(t, s) = along(c, p)
+  case rims_at(c, t) {
+    Ok(#(left, right)) if s >. left && s <. right -> {
+      let share = { s -. left } /. { right -. left }
+      0.0
+      -. c.depth
+      *. float.min(1.0, float.min(share, 1.0 -. share) /. wall_share)
+    }
+    _ -> 0.0
+  }
+}
+
+/// The share of the gap's width that each wall takes to reach the bottom.
+pub const wall_share = 0.35
+
+/// The distance between the points where a crevasse's rims change direction.
+const knot_spacing = 45.0
+
+/// A foot lands this far back from a rim.
+const rim_margin = 6.0
+
+/// Half the width of the path over a bridge.
+pub const bridge_half = 20.0
+
+/// The two rims of a crevasse as matching lists of corner points, from one
+/// end to the other. The rims are straight between corners.
+pub fn rims(c: Crevasse) -> List(#(Vec3, Vec3)) {
+  let count = knots(c)
+  let step = axis_length(c) /. int.to_float(count)
+  count_up(0, count, [])
+  |> list.map(fn(k) {
+    let t = int.to_float(k) *. step
+    let #(left, right) = knot(c, k, count)
+    #(across(c, t, left), across(c, t, right))
   })
+}
+
+/// The points where the bridge meets each rim, or an error with no bridge.
+pub fn bridge_ends(c: Crevasse) -> Result(#(Vec3, Vec3), Nil) {
+  case rims_at(c, c.bridge) {
+    Ok(#(left, right)) ->
+      Ok(#(across(c, c.bridge, left), across(c, c.bridge, right)))
+    Error(Nil) -> Error(Nil)
+  }
+}
+
+/// Solid ground for a foot that wants to land at `wanted`. A spot inside a
+/// crevasse moves to just past one rim: the rim on the same side of the
+/// gap's middle as `toward`.
+pub fn foothold(terrain: Terrain, wanted: Vec3, toward aim: Vec3) -> Vec3 {
+  let moved =
+    list.fold(terrain.crevasses, wanted, fn(p, c) {
+      let #(t, s) = along(c, p)
+      case rims_at(c, t) {
+        Ok(#(left, right)) if s >. left && s <. right -> {
+          let #(_, aim_s) = along(c, aim)
+          case aim_s <. { left +. right } /. 2.0 {
+            True -> across(c, t, left -. rim_margin)
+            False -> across(c, t, right +. rim_margin)
+          }
+        }
+        _ -> p
+      }
+    })
+  place(terrain, moved)
+}
+
+/// Where to head from `from` to reach `to`. When a crevasse lies between
+/// them, this is the near end of its bridge, then the far end. Without a
+/// bridge, or with nothing in the way, it is `to`.
+pub fn route(terrain: Terrain, from from: Vec3, to to: Vec3) -> Vec3 {
+  list.fold(terrain.crevasses, to, fn(goal, c) {
+    let #(t0, s0) = along(c, from)
+    let #(t1, s1) = along(c, goal)
+    let crosses = s0 *. s1 <. 0.0
+    let cross_t = case crosses {
+      True -> t0 +. { t1 -. t0 } *. s0 /. { s0 -. s1 }
+      False -> -1.0
+    }
+    let blocked =
+      cross_t >. 0.0
+      && cross_t <. axis_length(c)
+      && float.absolute_value(cross_t -. c.bridge) >. bridge_half *. 0.5
+    case blocked, rims_at(c, c.bridge) {
+      True, Ok(#(left, right)) -> {
+        let on_bridge =
+          float.absolute_value(t0 -. c.bridge) <. bridge_half *. 0.8
+          && s0 >. left -. 40.0
+          && s0 <. right +. 40.0
+        let from_left = s0 <. 0.0
+        case on_bridge == from_left {
+          True -> across(c, c.bridge, right +. 30.0)
+          False -> across(c, c.bridge, left -. 30.0)
+        }
+      }
+      _, _ -> goal
+    }
+  })
+}
+
+/// How far `p` is outside the crevasse (negative inside), and the way out.
+/// The path over the bridge counts as open ground. A point over the gap
+/// beside the bridge is sent back onto it when that is closer than a rim.
+fn crevasse_edge(c: Crevasse, p: Vec3) -> #(Float, Vec3) {
+  let #(t, s) = along(c, p)
+  let axis = vec3.normalize(vec3.subtract(c.to, c.from))
+  let side = Vec3(0.0 -. axis.z, 0.0, axis.x)
+  let off_bridge = float.absolute_value(t -. c.bridge) -. bridge_half
+  case rims_at(c, t) {
+    Error(Nil) -> #(1000.0, vec3.zero)
+    Ok(_) if c.bridge >=. 0.0 && off_bridge <. 0.0 -> #(1000.0, vec3.zero)
+    Ok(#(left, right)) ->
+      case s <=. left, s >=. right {
+        True, _ -> #(left -. s, vec3.scale(side, -1.0))
+        _, True -> #(s -. right, side)
+        _, _ -> {
+          let inside = float.min(s -. left, right -. s)
+          case c.bridge >=. 0.0 && off_bridge <. inside {
+            True ->
+              case t <. c.bridge {
+                True -> #(0.0 -. off_bridge, axis)
+                False -> #(0.0 -. off_bridge, vec3.scale(axis, -1.0))
+              }
+            False ->
+              case s -. left <. right -. s {
+                True -> #(0.0 -. inside, vec3.scale(side, -1.0))
+                False -> #(0.0 -. inside, side)
+              }
+          }
+        }
+      }
+  }
+}
+
+fn axis_length(c: Crevasse) -> Float {
+  vec3.ground_distance(c.from, c.to)
+}
+
+/// `p` as a distance along the crevasse's line and a distance to its side.
+fn along(c: Crevasse, p: Vec3) -> #(Float, Float) {
+  let axis = vec3.normalize(vec3.flat(vec3.subtract(c.to, c.from)))
+  let offset = vec3.flat(vec3.subtract(p, c.from))
+  #(vec3.dot(offset, axis), offset.z *. axis.x -. offset.x *. axis.z)
+}
+
+/// The ground point `t` along the crevasse's line and `s` to its side.
+fn across(c: Crevasse, t: Float, s: Float) -> Vec3 {
+  let axis = vec3.normalize(vec3.flat(vec3.subtract(c.to, c.from)))
+  Vec3(
+    c.from.x +. axis.x *. t -. axis.z *. s,
+    0.0,
+    c.from.z +. axis.z *. t +. axis.x *. s,
+  )
+}
+
+fn knots(c: Crevasse) -> Int {
+  int.max(6, float.round(axis_length(c) /. knot_spacing))
+}
+
+/// The side distances of the left and right rims at corner `k` of `count`.
+/// Each rim gets its own repeatable zigzag, and the gap closes at both ends.
+fn knot(c: Crevasse, k: Int, count: Int) -> #(Float, Float) {
+  let seed = c.from.x *. 0.37 +. c.from.z *. 0.11
+  let r = fn(channel) { hash_float(seed, k * 3 + channel) }
+  let taper = float.min(1.0, int.to_float(int.min(k, count - k)) /. 2.5)
+  let middle = c.width *. 0.3 *. { r(0) -. 0.5 } *. taper
+  #(
+    middle -. c.width /. 2.0 *. { 0.7 +. 0.3 *. r(1) } *. taper,
+    middle +. c.width /. 2.0 *. { 0.7 +. 0.3 *. r(2) } *. taper,
+  )
+}
+
+/// The side distances of the two rims `t` along the line, or an error past
+/// either end.
+fn rims_at(c: Crevasse, t: Float) -> Result(#(Float, Float), Nil) {
+  let length = axis_length(c)
+  case t >. 0.0 && t <. length {
+    False -> Error(Nil)
+    True -> {
+      let count = knots(c)
+      let at = t /. length *. int.to_float(count)
+      let k = int.min(count - 1, float.truncate(at))
+      let share = at -. int.to_float(k)
+      let #(left0, right0) = knot(c, k, count)
+      let #(left1, right1) = knot(c, k + 1, count)
+      Ok(#(
+        left0 +. { left1 -. left0 } *. share,
+        right0 +. { right1 -. right0 } *. share,
+      ))
+    }
+  }
 }
 
 /// The height of one rock or hill at `p`, with its wall dug out.
@@ -188,9 +402,17 @@ pub type Facet {
   Facet(normal: Vec3, reach: Float)
 }
 
-/// The facets of a rock: a level cap at its full height, a tilted top, a ring
-/// of 5 upper facets, and a ring of 8 steep lower facets. The rock is the
-/// space under all of them, and it stays inside its radius. A hill has none.
+/// Rocks with a radius above this are broad: low for their width, with a
+/// wide, rough top to walk on.
+const broad_radius = 120.0
+
+/// The facets of a rock. The rock is the space under all of them, and it
+/// stays inside its radius. A hill has none.
+///
+/// A rock has a level cap at its full height, a tilted top, a ring of 5 upper
+/// facets, and a ring of 8 steep lower facets. A broad rock has the cap, 3
+/// tilted tops, a ring of 7 gentle upper facets, and a ring of 10 steep
+/// lower facets.
 pub fn facets(rock: Rock) -> List(Facet) {
   case rock {
     Hill(..) -> []
@@ -208,30 +430,68 @@ pub fn facets(rock: Rock) -> List(Facet) {
           reach,
         )
       }
-      let top_pitch = 1.2 +. 0.2 *. r(1)
-      let top =
-        facet(
-          turn *. r(0),
-          top_pitch,
-          maths.sin(top_pitch) *. { 0.86 +. 0.1 *. r(2) },
-        )
-      let upper =
-        list.map([0, 1, 2, 3, 4], fn(k) {
+      // `count` facets spread around the rock, each turned by up to `loose`
+      // of the space between them.
+      let ring = fn(count, channel, loose, pitch, reach) {
+        count_up(0, count - 1, [])
+        |> list.map(fn(k) {
+          let c = channel + k * 3
           facet(
-            turn *. { r(3) +. { int.to_float(k) +. 0.5 *. r(10 + k) } /. 5.0 },
-            0.62 +. 0.3 *. r(20 + k),
-            0.78 +. 0.14 *. r(30 + k),
+            turn
+              *. {
+              r(channel - 1)
+              +. { int.to_float(k) +. loose *. r(c) }
+              /. int.to_float(count)
+            },
+            pitch(r(c + 1)),
+            reach(r(c + 2)),
           )
         })
-      let lower =
-        list.map([0, 1, 2, 3, 4, 5, 6, 7], fn(k) {
-          facet(
-            turn *. { r(4) +. { int.to_float(k) +. 0.2 *. r(40 + k) } /. 8.0 },
-            0.12 +. 0.2 *. r(50 + k),
-            0.7 +. 0.14 *. r(60 + k),
-          )
-        })
-      [Facet(Vec3(0.0, 1.0, 0.0), 1.0), top, ..list.append(upper, lower)]
+      }
+      let cap = Facet(Vec3(0.0, 1.0, 0.0), 1.0)
+      case radius >. broad_radius {
+        False -> {
+          let top_pitch = 1.2 +. 0.2 *. r(1)
+          let top =
+            facet(
+              turn *. r(0),
+              top_pitch,
+              maths.sin(top_pitch) *. { 0.86 +. 0.1 *. r(2) },
+            )
+          list.flatten([
+            [cap, top],
+            ring(5, 10, 0.5, fn(u) { 0.62 +. 0.3 *. u }, fn(u) {
+              0.78 +. 0.14 *. u
+            }),
+            ring(8, 40, 0.2, fn(u) { 0.12 +. 0.2 *. u }, fn(u) {
+              0.7 +. 0.14 *. u
+            }),
+          ])
+        }
+        True -> {
+          let tops =
+            list.map([0, 1, 2], fn(k) {
+              let pitch = 1.3 +. 0.15 *. r(k * 3 + 1)
+              facet(
+                turn
+                  *. {
+                  r(0) +. { int.to_float(k) +. 0.4 *. r(k * 3 + 2) } /. 3.0
+                },
+                pitch,
+                maths.sin(pitch) *. { 0.84 +. 0.12 *. r(k * 3 + 3) },
+              )
+            })
+          list.flatten([
+            [cap, ..tops],
+            ring(7, 20, 0.4, fn(u) { 0.8 +. 0.3 *. u }, fn(u) {
+              0.8 +. 0.1 *. u
+            }),
+            ring(10, 50, 0.2, fn(u) { 0.15 +. 0.2 *. u }, fn(u) {
+              0.8 +. 0.1 *. u
+            }),
+          ])
+        }
+      }
     }
   }
 }
@@ -247,11 +507,11 @@ pub fn place(terrain: Terrain, p: Vec3) -> Vec3 {
   Vec3(p.x, height(terrain, p), p.z)
 }
 
-/// A push away from every rock whose edge is closer than `margin`. It grows
+/// A push away from every rock and crevasse whose edge is closer than `margin`. It grows
 /// from 0 at `margin` to 1 at the edge, and more inside the rock.
 pub fn avoid(terrain: Terrain, p: Vec3, margin: Float) -> Vec3 {
-  list.fold(terrain.rocks, vec3.zero, fn(push, rock) {
-    let #(gap, out) = edge(rock, p)
+  list.fold(edges(terrain, p), vec3.zero, fn(push, edge) {
+    let #(gap, out) = edge
     case gap <. margin {
       False -> push
       True ->
@@ -260,15 +520,28 @@ pub fn avoid(terrain: Terrain, p: Vec3, margin: Float) -> Vec3 {
   })
 }
 
-/// `p` moved out to `pad` past the edge of any rock it is inside.
+/// `p` moved out to `pad` past the edge of any rock or crevasse it is inside.
 pub fn push_out(terrain: Terrain, p: Vec3, pad: Float) -> Vec3 {
-  list.fold(terrain.rocks, p, fn(p, rock) {
-    let #(gap, out) = edge(rock, p)
+  let obstacles =
+    list.append(
+      list.map(terrain.rocks, fn(rock) { edge(rock, _) }),
+      list.map(terrain.crevasses, fn(c) { crevasse_edge(c, _) }),
+    )
+  list.fold(obstacles, p, fn(p, edge_of) {
+    let #(gap, out) = edge_of(p)
     case gap <. pad {
       False -> p
       True -> vec3.add(p, vec3.scale(out, pad -. gap))
     }
   })
+}
+
+/// The edge of every rock and crevasse as seen from `p`.
+fn edges(terrain: Terrain, p: Vec3) -> List(#(Float, Vec3)) {
+  list.append(
+    list.map(terrain.rocks, edge(_, p)),
+    list.map(terrain.crevasses, crevasse_edge(_, p)),
+  )
 }
 
 /// How far `p` is outside the rock's footprint (negative inside), and the

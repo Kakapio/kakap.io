@@ -43,6 +43,44 @@ const MARK_COLOR: Record<Mark, string> = {
   ":)": "#5fd35f",
 };
 
+/**
+ * Pixel-art faces for the ";(" and ":)" marks, drawn instead of text so they
+ * read at a glance. `#` is ink, `o` is the mark's color, `t` is a tear.
+ */
+const FACES: Partial<Record<Mark, string[]>> = {
+  ";(": [
+    "...#####...",
+    "..#ooooo#..",
+    ".#ooooooo#.",
+    "#ooooooooo#",
+    "#oo#ooo#oo#",
+    "#oo#ooo#oo#",
+    "#otooooooo#",
+    "#oto###ooo#",
+    "#oo#ooo#oo#",
+    ".#ooooooo#.",
+    "..#ooooo#..",
+    "...#####...",
+  ],
+  ":)": [
+    "...#####...",
+    "..#ooooo#..",
+    ".#ooooooo#.",
+    "#ooooooooo#",
+    "#oo#ooo#oo#",
+    "#oo#ooo#oo#",
+    "#ooooooooo#",
+    "#oo#ooo#oo#",
+    "#ooo###ooo#",
+    ".#ooooooo#.",
+    "..#ooooo#..",
+    "...#####...",
+  ],
+};
+
+/** Screen pixels per face pixel. */
+const FACE_PIXEL = 2;
+
 /** Seconds a mark stays up. */
 const MARK_TIME = 1.6;
 
@@ -170,6 +208,21 @@ function drawMark(
   ctx.globalAlpha = Math.max(0, fade);
   ctx.translate(Math.round(x), Math.round(bottom + bob));
   ctx.scale(pop, pop);
+  const face = FACES[mark];
+  if (face) {
+    const size = face.length * FACE_PIXEL;
+    const colors: Record<string, string> = { "#": "#140d08", o: MARK_COLOR[mark], t: "#e8fbff" };
+    face.forEach((row, y) =>
+      [...row].forEach((cell, x) => {
+        const color = colors[cell];
+        if (!color) return;
+        ctx.fillStyle = color;
+        ctx.fillRect(x * FACE_PIXEL - Math.floor(size / 2), y * FACE_PIXEL - size, FACE_PIXEL, FACE_PIXEL);
+      }),
+    );
+    ctx.restore();
+    return;
+  }
   ctx.font = "700 26px 'Pixelify Sans', ui-monospace, monospace";
   ctx.textAlign = "center";
   ctx.textBaseline = "alphabetic";

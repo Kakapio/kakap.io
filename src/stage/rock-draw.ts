@@ -136,7 +136,7 @@ function build(r: RockView): Model {
     // Sunlight, plus light from the sky that favors faces that point up. Each
     // facet's tone is a little off, like weathered stone.
     const light =
-      (0.6 * (dot(n, SUN) - 0.2)) / 0.62 + 0.4 * n.y * n.y + 0.06 * noise(i, Math.round(r.center.x));
+      (0.6 * (dot(n, SUN) - 0.2)) / 0.7 + 0.4 * n.y * n.y + 0.09 * noise(i, Math.round(r.center.x));
     faces.push({ corners: ids, normal: n, middle, light });
   });
 
