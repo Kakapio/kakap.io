@@ -34,29 +34,43 @@ function lookOf(id: number): Look {
   };
 }
 
-type Mark = "!" | "?";
+type Mark = "!" | "?" | ";(" | ":)";
 
-const MARK_COLOR: Record<Mark, string> = { "!": "#ff2b1c", "?": "#ffd84a" };
+const MARK_COLOR: Record<Mark, string> = {
+  "!": "#ff2b1c",
+  "?": "#ffd84a",
+  ";(": "#87ceeb",
+  ":)": "#5fd35f",
+};
 
 /** Seconds a mark stays up. */
 const MARK_TIME = 1.6;
 
 /**
  * Game-style marks over the rabbits' heads: a red "!" when a rabbit panics,
- * and a "?" when it calms down again.
+ * a yellow "?" when it calms down, a sky-blue ";(" when it gives up and runs
+ * home, and a green ":)" when it comes back out.
  */
 export class Emotes {
-  private readonly fleeing = new Map<number, boolean>();
+  private readonly last = new Map<number, Pick<RabbitView, "fleeing" | "goingHome" | "indoors">>();
   private readonly shown = new Map<number, { mark: Mark; since: number }>();
 
   update(herd: RabbitView[], time: number) {
     for (const r of herd) {
-      if (r.indoors) continue;
-      const was = this.fleeing.get(r.id);
-      if (was !== undefined && was !== r.fleeing) {
-        this.shown.set(r.id, { mark: r.fleeing ? "!" : "?", since: time });
-      }
-      this.fleeing.set(r.id, r.fleeing);
+      const was = this.last.get(r.id);
+      const mark: Mark | null = !was
+        ? null
+        : was.indoors && !r.indoors
+          ? ":)"
+          : !was.goingHome && r.goingHome
+            ? ";("
+            : !r.indoors && !r.goingHome && was.fleeing !== r.fleeing
+              ? r.fleeing
+                ? "!"
+                : "?"
+              : null;
+      if (mark) this.shown.set(r.id, { mark, since: time });
+      this.last.set(r.id, { fleeing: r.fleeing, goingHome: r.goingHome, indoors: r.indoors });
     }
   }
 

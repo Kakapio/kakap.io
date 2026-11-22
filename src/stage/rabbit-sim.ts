@@ -19,6 +19,8 @@ export type RabbitView = {
   fleeing: boolean;
   hop: number;
   indoors: boolean;
+  /** Running for its door. */
+  goingHome: boolean;
   home: number;
 };
 
@@ -102,6 +104,7 @@ export function view(herd: Herd, cfg: RabbitConfig): RabbitView[] {
       fleeing: rabbits.is_fleeing(r),
       hop: rabbits.Rabbit$Rabbit$hop(r),
       indoors: rabbits.is_indoors(r),
+      goingHome: rabbits.Shelter$isGoingHome(rabbits.Rabbit$Rabbit$shelter(r)),
       home: rabbits.Rabbit$Rabbit$home(r),
     };
   });
