@@ -39,6 +39,11 @@ export class Camera {
     };
   }
 
+  /** Where the camera sits in the world. */
+  get eye(): V3 {
+    return this.position;
+  }
+
   project(p: V3): Projected {
     const rx = p.x - this.position.x;
     const ry = p.y - this.position.y;

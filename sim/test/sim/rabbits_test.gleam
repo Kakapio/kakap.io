@@ -1,7 +1,7 @@
 import gleam/float
 import gleam/list
 import sim/rabbits.{type Config, type Rabbit, Bounds, Config, Indoors, Outside}
-import sim/terrain.{Rock, Terrain}
+import sim/terrain.{Terrain}
 import sim/vec3.{type Vec3, Vec3}
 
 fn config() -> Config {
@@ -118,7 +118,7 @@ pub fn rabbits_stay_inside_the_bounds_test() {
 }
 
 pub fn rabbits_run_around_rocks_test() {
-  let rock = Rock(center: Vec3(0.0, 0.0, 0.0), radius: 80.0, height: 50.0)
+  let rock = terrain.rock(Vec3(0.0, 0.0, 0.0), 80.0, 50.0)
   let ground = Terrain([rock])
   let start = rabbits.herd(6, around: Vec3(-300.0, 0.0, 0.0), spread: 60.0)
   let spider = Vec3(-450.0, 0.0, 0.0)

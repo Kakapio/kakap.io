@@ -1,6 +1,6 @@
 import gleam/list
 import sim/spider.{type Config, type Spider, Config, Planted}
-import sim/terrain.{Rock, Terrain}
+import sim/terrain.{Terrain}
 import sim/vec3.{type Vec3, Vec3}
 
 fn config() -> Config {
@@ -106,8 +106,8 @@ pub fn a_stopped_spider_settles_its_feet_test() {
 pub fn feet_land_on_top_of_rocks_test() {
   let ground =
     Terrain([
-      Rock(center: Vec3(300.0, 0.0, 150.0), radius: 80.0, height: 50.0),
-      Rock(center: Vec3(500.0, 0.0, -150.0), radius: 70.0, height: 40.0),
+      terrain.rock(Vec3(300.0, 0.0, 150.0), 80.0, 50.0),
+      terrain.rock(Vec3(500.0, 0.0, -150.0), 70.0, 40.0),
     ])
   let target = Vec3(1200.0, 0.0, 0.0)
   let check = fn(s: Spider) {

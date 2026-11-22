@@ -217,14 +217,14 @@ export class Stage {
     this.land = scatterRocks((r) => !this.covers(r), homes);
   }
 
-  /** The ground point at screen fractions (u, v), moved toward the middle until the whole house fits on screen. */
+  /** The ground point at screen fractions (u, v), moved toward the middle until the house fits on screen. */
   private houseSpot(u: number, v: number): V3 {
     const cam = this.camera;
     const origin = { x: 0, y: 0, z: 0 };
     for (let k = 0; k < 20; k++) {
       const at = cam.groundAt(cam.width * u, cam.height * v) ?? origin;
-      const left = cam.project({ ...at, x: at.x - HOUSE_RADIUS * 1.6 }).x;
-      const right = cam.project({ ...at, x: at.x + HOUSE_RADIUS * 1.6 }).x;
+      const left = cam.project({ ...at, x: at.x - HOUSE_RADIUS * 0.6 }).x;
+      const right = cam.project({ ...at, x: at.x + HOUSE_RADIUS * 0.6 }).x;
       if (left >= 0 && right <= cam.width) return at;
       u += (0.5 - u) * 0.15;
     }
