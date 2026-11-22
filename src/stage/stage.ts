@@ -262,7 +262,7 @@ export class Stage {
       const p = { x: at.x + Math.cos(a) * radius, y: 0, z: at.z + Math.sin(a) * radius };
       return this.boil.jitter(this.camera.project({ ...p, y: heightAt(this.land, p) + 0.5 }), 700 + k);
     });
-    line(this.ctx, ring, `hsl(${s.eyeHue} 90% 70% / ${alpha})`, 2);
+    line(this.ctx, ring, `hsl(${s.eyeHue} 90% 52.5% / ${alpha})`, 2);
   }
 
   /** Pin the spot under a screen point, or remove the pin when the click lands on it. */
