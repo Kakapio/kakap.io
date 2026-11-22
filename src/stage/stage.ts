@@ -144,7 +144,7 @@ export class Stage {
     const ctx = this.ctx;
     this.ground.drawBase(ctx, cam);
     const layers = [
-      this.markLayers(),
+      this.markLayers(time),
       rockLayers(ctx, cam, this.land.rocks, this.boil),
       ...this.spiders.map((s) =>
         spiderLayers(ctx, cam, s.view, { boil: this.boil, time, skeleton: this.skeleton, eyeHue: s.eyeHue }),
@@ -235,41 +235,41 @@ export class Stage {
    * hovered spot. A ring on a rock sorts just in front of the rock, so it
    * shows on top of it. A ring on open ground lies under everything.
    */
-  private markLayers(): Layers {
-    const marks: { at: V3; alpha: number }[] = [];
-    if (this.pin) marks.push({ at: this.pin, alpha: 0.5 });
-    if (this.hover) marks.push({ at: this.hover, alpha: this.pin ? 0.22 : 0.4 });
+  private markLayers(time: number): Layers {
+    const marks: { at: V3; alpha: number; pulse: boolean }[] = [];
+    if (this.pin) marks.push({ at: this.pin, alpha: 0.85, pulse: true });
+    if (this.hover) marks.push({ at: this.hover, alpha: this.pin ? 0.35 : 0.75, pulse: !this.pin });
     const flat = marks.filter((m) => !rockUnder(this.land, m.at));
     const raised = marks.filter((m) => rockUnder(this.land, m.at));
     return {
-      shadows: () => flat.forEach((m) => this.drawMark(m.at, m.alpha)),
+      shadows: () => flat.forEach((m) => this.drawMark(m.at, m.alpha, m.pulse, time)),
       pieces: raised.map((m) => {
         const r = rockUnder(this.land, m.at)!;
         return {
           depth: this.camera.project({ ...r.center, z: r.center.z + r.radius }).depth - 0.01,
-          draw: () => this.drawMark(m.at, m.alpha),
+          draw: () => this.drawMark(m.at, m.alpha, m.pulse, time),
         };
       }),
     };
   }
 
-  /** A thin ring that follows the ground surface, rocks included. */
-  private drawMark(at: V3, alpha: number) {
+  /** A hand-drawn ring that follows the ground surface, rocks included. A pulsing ring breathes in and out. */
+  private drawMark(at: V3, alpha: number, pulse: boolean, time: number) {
     const s = this.spiders[0]!;
-    const radius = s.settings.stance * 0.36;
-    const ring = Array.from({ length: 41 }, (_, k) => {
-      const a = (k / 40) * Math.PI * 2;
+    const radius = s.settings.stance * (0.45 + (pulse ? 0.04 * Math.sin(time * 6) : 0));
+    const ring = Array.from({ length: 49 }, (_, k) => {
+      const a = (k / 48) * Math.PI * 2;
       const p = { x: at.x + Math.cos(a) * radius, y: 0, z: at.z + Math.sin(a) * radius };
-      return this.camera.project({ ...p, y: heightAt(this.land, p) + 0.5 });
+      return this.boil.jitter(this.camera.project({ ...p, y: heightAt(this.land, p) + 0.5 }), 700 + k);
     });
-    line(this.ctx, ring, `hsl(${s.eyeHue} 45% 70% / ${alpha})`, 1.25);
+    line(this.ctx, ring, `hsl(${s.eyeHue} 90% 70% / ${alpha})`, 2);
   }
 
   /** Pin the spot under a screen point, or remove the pin when the click lands on it. */
   private click(sx: number, sy: number) {
     const spot = pick(this.land, this.camera, sx, sy);
     if (!spot) return;
-    const radius = this.spiders[0]!.settings.stance * 0.36;
+    const radius = this.spiders[0]!.settings.stance * 0.45;
     const onPin = this.pin && Math.hypot(spot.x - this.pin.x, spot.z - this.pin.z) < radius;
     this.pin = onPin ? null : spot;
   }
