@@ -1,0 +1,36 @@
+/* Single dark underwater look by choice: the tank is always water. */
+:root {
+  --water-top: #123a47;
+  --water-deep: #071a22;
+  --ink: #dbe9ec;
+  --muted: #8fb0b8;
+  --panel: rgba(6, 22, 29, 0.86);
+  --line: rgba(159, 216, 224, 0.2);
+  --coral: #ee8a5c;
+  --amber: #f2c66d;
+  --display: "Space Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--water-deep);
+  color: var(--ink);
+  font-family: var(--display);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--coral);
+}
+
+:focus-visible {
+  outline: 2px solid var(--coral);
+  outline-offset: 2px;
+}

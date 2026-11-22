@@ -1,0 +1,13 @@
+name = "sim"
+version = "1.0.0"
+target = "javascript"
+
+[dependencies]
+gleam_stdlib = ">= 1.0.0 and < 2.0.0"
+gleam_community_maths = ">= 2.0.2 and < 3.0.0"
+
+[dev_dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
+
+[javascript]
+typescript_declarations = true

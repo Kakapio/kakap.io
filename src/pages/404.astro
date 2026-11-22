@@ -1,0 +1,28 @@
+---
+import Base from "../layouts/Base.astro";
+---
+
+<Base title="Not found · kakap.io">
+  <main>
+    <h1>404</h1>
+    <p>This page swam off. <a href="/">Back to the tank</a>.</p>
+  </main>
+</Base>
+
+<style>
+  main {
+    display: grid;
+    gap: 12px;
+    padding-top: calc(env(safe-area-inset-top, 0px) + 96px);
+    padding-left: max(24px, env(safe-area-inset-left, 0px));
+    padding-right: max(24px, env(safe-area-inset-right, 0px));
+  }
+  h1 {
+    margin: 0;
+    font-size: 3rem;
+  }
+  p {
+    margin: 0;
+    color: var(--muted);
+  }
+</style>

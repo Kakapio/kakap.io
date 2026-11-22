@@ -1,0 +1,59 @@
+---
+import Base from "../layouts/Base.astro";
+---
+
+<Base title="kakap.io">
+  <canvas id="tank" aria-hidden="true"></canvas>
+  <main>
+    <h1>kakap.io</h1>
+    <p>Work in progress. For now, one fish lives here. It follows your cursor, or your finger on a phone.</p>
+    <nav>
+      <a href="/lab/ik">IK lab</a>
+      <a href="https://github.com/Kakapio">GitHub</a>
+    </nav>
+  </main>
+</Base>
+
+<style>
+  #tank {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    pointer-events: none;
+  }
+  main {
+    position: relative;
+    display: grid;
+    gap: 16px;
+    max-width: 40rem;
+    padding-top: calc(env(safe-area-inset-top, 0px) + clamp(32px, 12vh, 112px));
+    padding-bottom: 32px;
+    padding-left: max(24px, env(safe-area-inset-left, 0px));
+    padding-right: max(24px, env(safe-area-inset-right, 0px));
+  }
+  h1 {
+    margin: 0;
+    font-size: clamp(2.5rem, 9vw, 4.5rem);
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+  p {
+    margin: 0;
+    max-width: 36ch;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+  nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    font-family: var(--mono);
+    font-size: 14px;
+  }
+</style>
+
+<script>
+  import "../tank/home";
+</script>
