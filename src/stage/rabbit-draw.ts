@@ -23,6 +23,7 @@ const NAMED: Record<number, Partial<Look>> = {
   0: { name: "Steph", tunic: "#d27896", fur: "#ecd58a", furShade: "#cdb269" },
   1: { name: "Alex" },
   2: { name: "Rishi", fur: "#9a6b45", furShade: "#7a5234" },
+  3: { name: "Max", tunic: "#7d8084" },
 };
 
 function lookOf(id: number): Look {

@@ -35,7 +35,7 @@ const WAYPOINT_SECONDS = 7;
 
 const RABBIT_COUNT = 6;
 
-/** Where the houses stand, as fractions of the screen width and height. House 0 is the named rabbits' house. */
+/** Where the houses stand, as fractions of the screen width and height. House 0 is Steph, Alex and Rishi's house (ids 0 to 2); Max lives in house 1. */
 const HOUSE_SPOTS = [
   { u: 0.17, v: 0.62 },
   { u: 0.84, v: 0.46 },
