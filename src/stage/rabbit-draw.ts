@@ -16,14 +16,19 @@ const TUNICS = [
   "#45374f",
 ];
 
-type Look = { name?: string; tunic: string; fur: string; furShade: string };
+/** `size` scales the whole rabbit; 1 is average height. */
+type Look = { name?: string; tunic: string; fur: string; furShade: string; size: number };
 
-/** Named rabbits by id. The rest of the herd stays anonymous. */
+/** Named rabbits by id. The rest of the herd (ids 4 and 5) stays anonymous. */
 const NAMED: Record<number, Partial<Look>> = {
   0: { name: "Steph", tunic: "#d27896", fur: "#ecd58a", furShade: "#cdb269" },
   1: { name: "Alex" },
   2: { name: "Rishi", fur: "#9a6b45", furShade: "#7a5234" },
   3: { name: "Max", tunic: "#7d8084" },
+  6: { name: "Ethan", fur: "#9be3f0", furShade: "#72c3d4", size: 0.85 },
+  7: { name: "Ashkan", tunic: "#7a5a3a", fur: "#7fc46a", furShade: "#5f9f4d" },
+  8: { name: "Matthew", tunic: "#3f4a5a", fur: "#ffe23a", furShade: "#dcbd1e" },
+  9: { name: "Sam", tunic: "#6b5a2e", fur: "#2f5fa8", furShade: "#234a86" },
 };
 
 function lookOf(id: number): Look {
@@ -31,6 +36,7 @@ function lookOf(id: number): Look {
     tunic: TUNICS[id % TUNICS.length]!,
     fur: FUR,
     furShade: FUR_SHADE,
+    size: 1,
     ...NAMED[id],
   };
 }
@@ -139,7 +145,8 @@ export function rabbitLayers(
       ctx.fillStyle = INK.shadow;
       ctx.globalAlpha = 1 - Math.min(0.6, r.lift / 30);
       ctx.beginPath();
-      ctx.ellipse(p.x, p.y, 13 * p.scale, 5.5 * p.scale, 0, 0, Math.PI * 2);
+      const s = p.scale * lookOf(r.id).size;
+      ctx.ellipse(p.x, p.y, 13 * s, 5.5 * s, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.globalAlpha = 1;
     }
@@ -187,10 +194,10 @@ function drawNametag(
   return y;
 }
 
-/** The screen y just above the ear tips. The rabbit is an upright cut-out sized by `scale`. */
+/** The screen y just above the ear tips. The rabbit is an upright cut-out sized by `scale` and its own `size`. */
 function headTop(cam: Camera, r: RabbitView): number {
   const base = cam.project({ ...r.position, y: r.lift });
-  return base.y - 56 * base.scale - 6;
+  return base.y - 56 * base.scale * lookOf(r.id).size - 6;
 }
 
 /** A pixel-font mark that pops in, bobs, and fades out. `bottom` is its baseline. */
@@ -256,13 +263,13 @@ function drawRabbit(
     z: r.position.z + Math.sin(r.heading) * 10,
   });
   const face = ahead.x >= base.x ? 1 : -1;
-  const s = base.scale;
+  const look = lookOf(r.id);
+  const s = base.scale * look.size;
   const seed = 500 + r.id * 40;
   const at = (x: number, y: number, k: number) =>
     boil.jitter({ x: base.x + x * face * s, y: base.y - y * s }, seed + k);
   const outline = Math.max(1, 2.2 * s);
   const airborne = r.lift > 1.5;
-  const look = lookOf(r.id);
 
   // Feet tuck under while airborne.
   for (const side of [-1, 1]) {

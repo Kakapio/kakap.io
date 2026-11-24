@@ -33,9 +33,9 @@ const PAGE_CONTROLS = "a, button, input, select, textarea, summary, label, detai
 /** Seconds each spider spends on each waypoint when nobody is pointing. */
 const WAYPOINT_SECONDS = 7;
 
-const RABBIT_COUNT = 6;
+const RABBIT_COUNT = 10;
 
-/** Where the houses stand, as fractions of the screen width and height. House 0 is Steph, Alex and Rishi's house (ids 0 to 2); Max lives in house 1. */
+/** Where the houses stand, as fractions of the screen width and height. House 0 is home to ids 0 to 4 (Steph, Alex, Rishi, Max and one unnamed rabbit); house 1 to ids 5 to 9 (the other unnamed rabbit, Ethan, Ashkan, Matthew and Sam). */
 const HOUSE_SPOTS = [
   { u: 0.17, v: 0.62 },
   { u: 0.84, v: 0.46 },
