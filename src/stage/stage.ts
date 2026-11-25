@@ -299,9 +299,11 @@ export class Stage {
     this.ground.render(this.camera, dpr);
     this.bounds = this.visibleBounds();
     const homes = HOUSE_SPOTS.map((spot) => this.houseSpot(spot.u, spot.v));
-    const crevasse = this.crevasseSpot(homes);
-    const boulder = this.boulderSpot(homes, crevasse);
-    this.land = scatterRocks((r) => !this.covers(r), homes, crevasse, boulder, this.pondSpot(homes, crevasse, boulder));
+    // The pond needs the most room, so it picks its spot first and the crevasse and boulder go around it.
+    const pond = this.pondSpot(homes);
+    const crevasse = this.crevasseSpot(homes, pond);
+    const boulder = this.boulderSpot(homes, crevasse, pond);
+    this.land = scatterRocks((r) => !this.covers(r), homes, crevasse, boulder, pond);
     const water = this.land.ponds[0];
     this.school = water ? fishes.stock(water, FISH_COUNT) : [];
     // The old patches may now be under a rock or off the screen.
@@ -332,10 +334,10 @@ export class Stage {
 
   /**
    * The first crevasse line with a long enough part that is on screen and
-   * clear of the page text, the houses and the nest. The crevasse follows
-   * that part of the line.
+   * clear of the page text, the houses, the nest and the pond. The crevasse
+   * follows that part of the line.
    */
-  private crevasseSpot(homes: V3[]): CrevasseSpot | null {
+  private crevasseSpot(homes: V3[], pond: V3 | null): CrevasseSpot | null {
     const cam = this.camera;
     const half = CREVASSE_WIDTH / 2;
     const steps = 16;
@@ -349,7 +351,12 @@ export class Stage {
       const fits = (p: V3) => {
         const on = cam.project(p);
         const onScreen = on.x > 0 && on.x < cam.width && on.y > 0 && on.y < cam.height;
-        return onScreen && this.isOpen(p, half, homes) && !this.covers({ center: p, radius: half, height: 0 });
+        return (
+          onScreen &&
+          this.isOpen(p, half, homes) &&
+          !this.covers({ center: p, radius: half, height: 0 }) &&
+          (!pond || Math.hypot(p.x - pond.x, p.z - pond.z) > POND_RADIUS + half + 50)
+        );
       };
       // The longest run of points along the line that all fit.
       let best = { first: 0, count: 0 };
@@ -365,21 +372,22 @@ export class Stage {
     return null;
   }
 
-  /** The first boulder spot that is clear of the page text, the houses, the nest and the crevasse. */
-  private boulderSpot(homes: V3[], crevasse: CrevasseSpot | null): V3 | null {
+  /** The first boulder spot that is clear of the page text, the houses, the nest, the crevasse and the pond. */
+  private boulderSpot(homes: V3[], crevasse: CrevasseSpot | null, pond: V3 | null): V3 | null {
     for (const spot of BOULDER_SPOTS) {
       const at = this.groundAt(spot);
       const clear =
         this.isOpen(at, BOULDER_RADIUS, homes) &&
         !this.covers({ center: at, radius: BOULDER_RADIUS, height: 0 }) &&
-        (!crevasse || distanceToLine(at, crevasse.from, crevasse.to) > BOULDER_RADIUS + CREVASSE_WIDTH / 2 + 40);
+        (!crevasse || distanceToLine(at, crevasse.from, crevasse.to) > BOULDER_RADIUS + CREVASSE_WIDTH / 2 + 40) &&
+        (!pond || Math.hypot(at.x - pond.x, at.z - pond.z) > POND_RADIUS + BOULDER_RADIUS + 50);
       if (clear) return at;
     }
     return null;
   }
 
-  /** The first pond spot that is on screen and clear of the page text, the houses, the nest, the crevasse and the boulder. */
-  private pondSpot(homes: V3[], crevasse: CrevasseSpot | null, boulder: V3 | null): V3 | null {
+  /** The first pond spot that is on screen and clear of the page text, the houses and the nest. */
+  private pondSpot(homes: V3[]): V3 | null {
     const cam = this.camera;
     for (const spot of POND_SPOTS) {
       const at = this.groundAt(spot);
@@ -392,9 +400,7 @@ export class Stage {
       const clear =
         edges.every((p) => p.x > 0 && p.x < cam.width && p.y > 0 && p.y < cam.height) &&
         this.isOpen(at, POND_RADIUS, homes) &&
-        !this.covers({ center: at, radius: POND_RADIUS, height: 0 }) &&
-        (!crevasse || distanceToLine(at, crevasse.from, crevasse.to) > POND_RADIUS + CREVASSE_WIDTH / 2 + 50) &&
-        (!boulder || Math.hypot(at.x - boulder.x, at.z - boulder.z) > POND_RADIUS + BOULDER_RADIUS + 50);
+        !this.covers({ center: at, radius: POND_RADIUS, height: 0 });
       if (clear) return at;
     }
     return null;
