@@ -1,3 +1,4 @@
+import { attachDebug } from "./debug-panel";
 import { GROUP_COLOR } from "./spider-draw";
 import { SPIDERS, type SpiderKind, type SpiderSettings } from "./spider-sim";
 import { Stage } from "./stage";
@@ -38,6 +39,11 @@ if (canvas) {
   document.getElementById("skeleton")?.addEventListener("change", (e) => {
     stage.skeleton = (e.target as HTMLInputElement).checked;
   });
+  const debugBox = document.querySelector<HTMLInputElement>("#debug");
+  const debug = attachDebug(stage, (on) => {
+    if (debugBox) debugBox.checked = on;
+  });
+  debugBox?.addEventListener("change", () => debug.toggle(debugBox.checked));
   document.getElementById("boil")?.addEventListener("change", (e) => {
     stage.boil.amount = (e.target as HTMLInputElement).checked ? boilAmount || 0.9 : 0;
   });

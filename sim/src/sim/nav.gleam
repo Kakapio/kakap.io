@@ -139,6 +139,37 @@ pub fn goal(field: Field) -> Vec3 {
   field.goal
 }
 
+/// The grid the field was built on, with the goal's cell open.
+pub fn grid_of(field: Field) -> Grid {
+  field.grid
+}
+
+/// The width of one cell.
+pub fn cell_width(grid: Grid) -> Float {
+  grid.cell
+}
+
+/// The center of cell number `cell`. Cells count along a row, then up the rows.
+pub fn cell_center(grid: Grid, cell: Int) -> Vec3 {
+  center(grid, cell)
+}
+
+/// True when cell number `cell` is open.
+pub fn open_at(grid: Grid, cell: Int) -> Bool {
+  mask_has(grid.open, cell)
+}
+
+/// The cost of the way to the goal from cell number `cell`, or -1 with no way.
+pub fn cost(field: Field, cell: Int) -> Int {
+  cost_at(field.cost, cell)
+}
+
+/// The next cell on the way to the goal from cell number `cell`. It is an
+/// error at the goal's cell and at a cell with no way.
+pub fn next_cell(field: Field, cell: Int) -> Result(Int, Nil) {
+  downhill(field, cell)
+}
+
 /// True when the cell that holds `p` has a way to the goal.
 pub fn reaches(field: Field, from p: Vec3) -> Bool {
   cost_at(field.cost, cell_of(field.grid, p)) >= 0

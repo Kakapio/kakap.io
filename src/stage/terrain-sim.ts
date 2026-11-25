@@ -133,6 +133,18 @@ function crevasseView(c: terrain.Crevasse$): CrevasseView {
   };
 }
 
+/** Half the width of the path over a bridge, which counts as open ground. */
+export const BRIDGE_HALF = terrain.bridge_half;
+
+/**
+ * The part of a rock or house that blocks a walker: a circle of `radius`
+ * around `center`, less anything nearer than `wallZ`.
+ */
+export function footprint(r: RockView): { center: V3; radius: number; wallZ: number } {
+  const [radius, wallZ] = terrain.footprint(r.rock);
+  return { center: r.center, radius, wallZ };
+}
+
 /** The ground distance from `p` to the line segment from `a` to `b`. */
 export function distanceToLine(p: V3, a: V3, b: V3): number {
   const [dx, dz] = [b.x - a.x, b.z - a.z];

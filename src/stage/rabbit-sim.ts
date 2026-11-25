@@ -3,6 +3,7 @@ import * as vec3 from "@gleam/sim/sim/vec3.mjs";
 import { Result$isOk, Result$Ok$0 } from "@gleam/prelude.mjs";
 import { toArray, fromArray } from "../gleam";
 import type { V3 } from "./camera";
+import type { Field, Grid } from "./nav-sim";
 import type { Terrain } from "./terrain-sim";
 
 export type Herd = rabbits.Rabbit$[];
@@ -12,6 +13,7 @@ export type Bounds = { minX: number; maxX: number; minZ: number; maxZ: number };
 export type RabbitView = {
   id: number;
   position: V3;
+  velocity: V3;
   lift: number;
   heading: number;
   speed: number;
@@ -100,6 +102,44 @@ export function step(
   );
 }
 
+/** The distances the rabbits' steering and collisions use, in world units. */
+export const LIMITS = {
+  /** The closest a rabbit's center comes to a rock's edge. */
+  rockPad: rabbits.rock_pad,
+  /** Distance from a rock's edge where the rock starts to push back. */
+  rockMargin: rabbits.rock_margin,
+  /** Distance from an edge of the bounds where the wall starts to push back. */
+  wallMargin: rabbits.wall_margin,
+  /** A rabbit this close to its door goes in. */
+  doorReach: rabbits.door_reach,
+  /** A calm rabbit keeps away from a spider from this many fear radii out. */
+  wary: rabbits.wary,
+};
+
+/** The grid and the fields in `paths`. `huddle` is null before the first one is built. */
+export function ways(paths: Paths): { grid: Grid | null; doors: Field[]; huddle: Field | null } {
+  const grid = rabbits.path_grid(paths);
+  const huddle = rabbits.huddle_way(paths);
+  return {
+    grid: Result$isOk(grid) ? Result$Ok$0(grid)! : null,
+    doors: toArray(rabbits.door_ways(paths)),
+    huddle: Result$isOk(huddle) ? Result$Ok$0(huddle)! : null,
+  };
+}
+
+/**
+ * The point each rabbit heads for along its way, in herd order: null for a
+ * rabbit that is indoors, flees, or is alone outside.
+ */
+export function aims(herd: Herd, doors: V3[], paths: Paths): (V3 | null)[] {
+  const all = fromArray(herd);
+  const doorList = fromArray(doors.map(toV3));
+  return herd.map((r) => {
+    const aim = rabbits.aim(r, all, doorList, paths);
+    return Result$isOk(aim) ? fromV3(Result$Ok$0(aim)!) : null;
+  });
+}
+
 export const fearRadius = (cfg: RabbitConfig): number => rabbits.Config$Config$fear_radius(cfg);
 
 /** The center of the rabbits that are outside, or null when they are all indoors. */
@@ -114,6 +154,7 @@ export function view(herd: Herd, cfg: RabbitConfig): RabbitView[] {
     return {
       id: rabbits.Rabbit$Rabbit$id(r),
       position: fromV3(rabbits.Rabbit$Rabbit$position(r)),
+      velocity,
       lift: rabbits.lift(r, cfg),
       heading: rabbits.Rabbit$Rabbit$heading(r),
       speed: Math.hypot(velocity.x, velocity.z),

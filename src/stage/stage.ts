@@ -1,6 +1,7 @@
 import { Pointer, runLoop } from "../tank/canvas";
 import { Camera, type V3 } from "./camera";
 import { crevasseLayers } from "./crevasse-draw";
+import { DebugDraw } from "./debug-draw";
 import { Ground } from "./ground";
 import { Boil, line } from "./ink";
 import { houseLayers } from "./house-draw";
@@ -92,6 +93,10 @@ export class Stage {
   readonly boil = new Boil();
   readonly pointer = new Pointer();
   skeleton = false;
+  /** Draw the nav grid, a flow field, and the collision and steering shapes over the scene. */
+  debug = false;
+  /** The index in `debugWays` of the field the debug view shows. */
+  debugWay = 0;
   aim: Aim = "waypoint";
   onFrame: (time: number) => void = () => {};
 
@@ -99,6 +104,7 @@ export class Stage {
   private readonly ground = new Ground();
   private land: Land = scatterRocks();
   private readonly emotes = new Emotes();
+  private readonly debugDraw = new DebugDraw();
   private readonly spiders: Walker[];
   private rabbitCfg = bunnies.config(bunnies.DEFAULT_RABBITS);
   private herd: bunnies.Herd;
@@ -145,6 +151,11 @@ export class Stage {
 
   get target(): V3 {
     return this.spiders[0]!.target;
+  }
+
+  /** The fields the debug view can show, by name. The last shows the grid with no field. */
+  get debugWays(): string[] {
+    return ["Huddle", ...HOUSE_SPOTS.map((_, i) => `Door ${i}`), "Grid only"];
   }
 
   /** Give every spider new settings. */
@@ -210,6 +221,7 @@ export class Stage {
     for (const l of layers) l.overlay?.();
     this.ground.drawOverlay(ctx, cam);
     for (const l of layers) l.ui?.();
+    if (this.debug) this.drawDebug(rabbits, doors);
     this.onFrame(time);
   }
 
@@ -414,6 +426,24 @@ export class Stage {
     const radius = this.spiders[0]!.settings.stance * 0.45;
     const onPin = this.pin && Math.hypot(spot.x - this.pin.x, spot.z - this.pin.z) < radius;
     this.pin = onPin ? null : spot;
+  }
+
+  private drawDebug(rabbits: bunnies.RabbitView[], doors: V3[]) {
+    const ways = bunnies.ways(this.paths);
+    const fields = [ways.huddle, ...ways.doors];
+    this.debugDraw.draw(this.ctx, this.camera, {
+      land: this.land,
+      bounds: this.bounds,
+      grid: ways.grid,
+      field: fields[this.debugWay] ?? null,
+      rabbits,
+      aims: bunnies.aims(this.herd, doors, this.paths),
+      huddle: bunnies.outsideCentroid(this.herd),
+      spacing: bunnies.DEFAULT_RABBITS.spacing,
+      huddleRadius: bunnies.DEFAULT_RABBITS.huddleRadius,
+      fearRadius: bunnies.fearRadius(this.rabbitCfg),
+      spiders: this.spiders.map((s) => ({ body: s.view.body, target: s.target })),
+    });
   }
 
   private drawFearRings() {

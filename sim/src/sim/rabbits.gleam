@@ -71,15 +71,15 @@ const calm_down = 0.6
 const contagion = 0.8
 
 /// Distance from an edge where the wall starts to push back.
-const wall_margin = 90.0
+pub const wall_margin = 90.0
 
 const golden_angle = 2.399963
 
 /// Distance from a rock's edge where the rock starts to push back.
-const rock_margin = 36.0
+pub const rock_margin = 36.0
 
 /// The closest a rabbit's center comes to a rock's edge.
-const rock_pad = 12.0
+pub const rock_pad = 12.0
 
 /// Seconds of fear that send a rabbit home.
 const dread_limit = 3.0
@@ -91,7 +91,7 @@ const dread_fade = 0.4
 const indoor_time = 5.0
 
 /// A rabbit this close to its door goes in.
-const door_reach = 18.0
+pub const door_reach = 18.0
 
 /// A rabbit comes out when no spider is within this many fear radii of its
 /// door.
@@ -99,7 +99,7 @@ const all_clear = 1.3
 
 /// A calm rabbit starts to keep away from a spider this many fear radii out,
 /// so it steers around spiders instead of walking into their range.
-const wary = 1.2
+pub const wary = 1.2
 
 /// The width of a cell of the grid the rabbits find their way on.
 const path_cell = 24.0
@@ -157,6 +157,50 @@ pub fn update_paths(
         Error(Nil) -> Paths(..paths, age:)
       }
     _, _, _ -> Paths(..paths, age:)
+  }
+}
+
+/// The grid the rabbits find their way on, or an error with no paths.
+pub fn path_grid(paths: Paths) -> Result(nav.Grid, Nil) {
+  paths.grid
+}
+
+/// The field of ways to each house door, in house order.
+pub fn door_ways(paths: Paths) -> List(nav.Field) {
+  paths.doors
+}
+
+/// The field of ways to the huddle, or an error before the first one is built.
+pub fn huddle_way(paths: Paths) -> Result(nav.Field, Nil) {
+  paths.huddle
+}
+
+/// The point `rabbit` heads for along its way this frame: toward its door
+/// when it runs home, and toward the rest of the herd when it is calm. It is
+/// an error for a rabbit that is indoors, flees, or is alone outside.
+pub fn aim(
+  rabbit: Rabbit,
+  among rabbits: List(Rabbit),
+  doors doors: List(Vec3),
+  paths paths: Paths,
+) -> Result(Vec3, Nil) {
+  let door = list.drop(doors, rabbit.home) |> list.first
+  let way_home = list.drop(paths.doors, rabbit.home) |> list.first
+  let others =
+    list.filter(rabbits, fn(other) {
+      other.id != rabbit.id && !is_indoors(other)
+    })
+  case rabbit.shelter, door, others {
+    Indoors(_), _, _ -> Error(Nil)
+    GoingHome, Ok(door), _ ->
+      Ok(follow(way_home, from: rabbit.position, to: door))
+    _, _, [] -> Error(Nil)
+    _, _, _ ->
+      case is_fleeing(rabbit) {
+        True -> Error(Nil)
+        False ->
+          Ok(follow(paths.huddle, from: rabbit.position, to: centroid(others)))
+      }
   }
 }
 

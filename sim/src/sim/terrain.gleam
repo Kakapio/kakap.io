@@ -511,27 +511,28 @@ fn edges(terrain: Terrain, p: Vec3) -> List(#(Float, Vec3)) {
   )
 }
 
-/// How far `p` is outside the rock's footprint (negative inside), and the
-/// way out. The footprint is the circle less anything in front of the wall.
-fn edge(rock: Rock, p: Vec3) -> #(Float, Vec3) {
-  let away = vec3.flat(vec3.subtract(p, rock.center))
-  let wall = rock.center.z -. rock.cut -. p.z
+/// The part of a rock or hill that blocks a walker: a circle of the first
+/// radius around its center, less anything in front of the wall, which
+/// stands at the second value on the z axis. A hill's low outer slopes count
+/// as open ground.
+pub fn footprint(rock: Rock) -> #(Float, Float) {
+  let wall = rock.center.z -. rock.cut
   case rock {
-    Rock(..) -> {
-      let round = vec3.length(away) -. rock.radius
-      case wall >. round {
-        True -> #(wall, Vec3(0.0, 0.0, -1.0))
-        False -> #(round, outward(away))
-      }
-    }
-    // A hill's low outer slopes count as open ground.
-    Hill(radius:, ..) -> {
-      let round = vec3.length(away) -. radius *. 0.6
-      case wall >. round {
-        True -> #(wall, Vec3(0.0, 0.0, -1.0))
-        False -> #(round, outward(away))
-      }
-    }
+    Rock(radius:, ..) -> #(radius, wall)
+    Hill(radius:, ..) -> #(radius *. 0.6, wall)
+  }
+}
+
+/// How far `p` is outside the rock's footprint (negative inside), and the
+/// way out.
+fn edge(rock: Rock, p: Vec3) -> #(Float, Vec3) {
+  let #(radius, wall_z) = footprint(rock)
+  let away = vec3.flat(vec3.subtract(p, rock.center))
+  let wall = wall_z -. p.z
+  let round = vec3.length(away) -. radius
+  case wall >. round {
+    True -> #(wall, Vec3(0.0, 0.0, -1.0))
+    False -> #(round, outward(away))
   }
 }
 
