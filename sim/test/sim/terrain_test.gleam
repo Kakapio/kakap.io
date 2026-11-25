@@ -6,7 +6,7 @@ import sim/vec3.{Vec3}
 const rock = Rock(Vec3(100.0, 0.0, 50.0), 40.0, 30.0, 40.0)
 
 pub fn a_rock_is_tall_at_its_center_and_stays_inside_its_radius_test() {
-  let ground = Terrain([rock], [])
+  let ground = Terrain([rock], [], [])
   let top = terrain.height(ground, at: Vec3(100.0, 0.0, 50.0))
   assert top >. 24.0
   assert top <=. 30.0
@@ -20,7 +20,7 @@ pub fn a_rock_has_facets_that_cover_its_surface_test() {
   assert list.all(facets, fn(f) { f.normal.y >. 0.0 })
   // The surface point above (110, 60) lies under every facet and on one.
   let y =
-    terrain.height(Terrain([rock], []), at: Vec3(110.0, 0.0, 60.0)) /. 30.0
+    terrain.height(Terrain([rock], [], []), at: Vec3(110.0, 0.0, 60.0)) /. 30.0
   let gaps =
     list.map(facets, fn(f) {
       f.reach -. f.normal.x *. 0.25 -. f.normal.y *. y -. f.normal.z *. 0.25
@@ -30,7 +30,7 @@ pub fn a_rock_has_facets_that_cover_its_surface_test() {
 }
 
 pub fn push_out_moves_a_point_past_the_edge_test() {
-  let ground = Terrain([rock], [])
+  let ground = Terrain([rock], [], [])
   let p = terrain.push_out(ground, Vec3(110.0, 0.0, 50.0), 5.0)
   assert vec3.ground_distance(p, rock.center) >=. 44.999
 }
@@ -45,8 +45,8 @@ pub fn scatter_is_repeatable_and_stays_in_its_cells_test() {
       cell: 500.0,
     )
   }
-  let Terrain(rocks, _) = make()
-  assert make() == Terrain(rocks, [])
+  let Terrain(rocks, _, _) = make()
+  assert make() == Terrain(rocks, [], [])
   assert rocks != []
   assert list.all(rocks, fn(r) {
     r.center.x >=. -1000.0
@@ -59,7 +59,7 @@ pub fn scatter_is_repeatable_and_stays_in_its_cells_test() {
 
 pub fn a_wall_flattens_the_front_of_a_rock_test() {
   let house = Rock(Vec3(0.0, 0.0, 0.0), 80.0, 60.0, 56.0)
-  let ground = Terrain([house], [])
+  let ground = Terrain([house], [], [])
   assert terrain.height(ground, at: Vec3(0.0, 0.0, -60.0)) == 0.0
   assert terrain.height(ground, at: Vec3(0.0, 0.0, -50.0)) >. 0.0
   let p = terrain.push_out(ground, Vec3(0.0, 0.0, -50.0), 10.0)
@@ -69,7 +69,7 @@ pub fn a_wall_flattens_the_front_of_a_rock_test() {
 
 pub fn a_hill_fades_into_the_ground_with_a_dug_entrance_test() {
   let hill = terrain.Hill(Vec3(0.0, 0.0, 0.0), 210.0, 95.0, 50.0, 0.4363)
-  let ground = Terrain([hill], [])
+  let ground = Terrain([hill], [], [])
   // Tall behind the wall, low near its edge, nothing past its radius.
   assert terrain.height(ground, at: Vec3(0.0, 0.0, 10.0)) >. 80.0
   assert terrain.height(ground, at: Vec3(0.0, 0.0, 52.0)) >. 90.0
@@ -113,7 +113,7 @@ pub fn a_crevasse_has_jagged_rims_that_close_at_both_ends_test() {
 }
 
 pub fn a_crevasse_is_deep_inside_and_level_outside_test() {
-  let ground = Terrain([], [crack])
+  let ground = Terrain([], [crack], [])
   let assert Ok(#(left, right)) = terrain.bridge_ends(crack)
   let middle = vec3.lerp(left, right, 0.5)
   assert terrain.height(ground, at: middle) == -170.0
@@ -123,7 +123,7 @@ pub fn a_crevasse_is_deep_inside_and_level_outside_test() {
 }
 
 pub fn a_foothold_is_never_inside_a_crevasse_test() {
-  let ground = Terrain([], [crack])
+  let ground = Terrain([], [crack], [])
   let spots =
     list.flat_map(numbers(0, 60), fn(i) {
       list.map(numbers(-8, 8), fn(j) {
@@ -142,7 +142,7 @@ pub fn a_foothold_is_never_inside_a_crevasse_test() {
 }
 
 pub fn a_crevasse_blocks_the_way_except_at_its_bridge_test() {
-  let ground = Terrain([], [crack])
+  let ground = Terrain([], [crack], [])
   let assert Ok(#(left, right)) = terrain.bridge_ends(crack)
   // A point over the gap moves out to a rim.
   let out = terrain.push_out(ground, Vec3(150.0, 0.0, 5.0), 12.0)
@@ -161,7 +161,7 @@ pub fn a_crevasse_blocks_the_way_except_at_its_bridge_test() {
 
 pub fn a_broad_rock_has_a_wide_low_top_test() {
   let boulder = terrain.rock(Vec3(0.0, 0.0, 0.0), 190.0, 48.0)
-  let ground = Terrain([boulder], [])
+  let ground = Terrain([boulder], [], [])
   assert list.length(terrain.facets(boulder)) == 21
   // Most of the way out, the top is still more than half the full height.
   let ring =

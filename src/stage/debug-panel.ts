@@ -14,10 +14,10 @@ const LEGEND: { swatch: string; line?: boolean; text: string }[] = [
   {
     swatch: C.obstacle,
     line: true,
-    text: "Obstacle footprint. Thin line: closest a rabbit's center gets. Dashed: where it starts to push",
+    text: "Obstacle or pond footprint. Thin line: closest a rabbit's center gets. Dashed: where it starts to push",
   },
   { swatch: C.bounds, line: true, text: "Bounds. Dashed: where the walls start to push" },
-  { swatch: C.door, line: true, text: "Door reach, and the huddle's center and radius (dashed)" },
+  { swatch: C.door, line: true, text: "Door reach, food reach, and the huddle's center and radius (dashed)" },
   { swatch: C.fear, line: true, text: "Spider: fear radius, and the spot it walks to" },
   { swatch: C.wary, line: true, text: "Spider: calm rabbits keep away from here in" },
   { swatch: C.calm, line: true, text: "Calm rabbit, and the path over the bridge" },

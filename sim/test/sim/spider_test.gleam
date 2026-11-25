@@ -111,6 +111,7 @@ pub fn feet_land_on_top_of_rocks_test() {
         terrain.rock(Vec3(500.0, 0.0, -150.0), 70.0, 40.0),
       ],
       [],
+      [],
     )
   let target = Vec3(1200.0, 0.0, 0.0)
   let check = fn(s: Spider) {
@@ -169,7 +170,7 @@ fn cross_crevasse(from: Vec3, target: Vec3, frames: Int) -> #(Bool, Bool) {
       170.0,
       -1.0,
     )
-  let ground = Terrain([], [crack])
+  let ground = Terrain([], [crack], [])
   // Facing the target, so the walk has no sharp turn.
   let first =
     spider.new_on(ground, from, vec3.yaw(vec3.subtract(target, from)), small())

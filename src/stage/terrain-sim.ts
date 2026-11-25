@@ -21,9 +21,13 @@ export type HouseView = RockView & { cut: number; lean: number; door: V3; index:
  */
 export type CrevasseView = { rims: [V3, V3][]; depth: number; bridge: [V3, V3] | null };
 
+/** A round pool of shallow water, level with the ground. `pond` is the pond as the sim sees it. */
+export type PondView = { center: V3; radius: number; pond: terrain.Pond$ };
+
 /**
  * `rocks` are the rocks to draw. `mounds` are everything raised: the rocks and
- * the houses. `ground` holds the mounds and the crevasses for the sim.
+ * the houses. `ground` holds the mounds, the crevasses and the ponds for the
+ * sim.
  */
 export type Land = {
   ground: Terrain;
@@ -31,6 +35,7 @@ export type Land = {
   houses: HouseView[];
   mounds: RockView[];
   crevasses: CrevasseView[];
+  ponds: PondView[];
 };
 
 /** A crevasse to dig: a line on the ground, and how far along it the bridge crosses, from 0 to 1. */
@@ -43,6 +48,9 @@ const CREVASSE_DEPTH = 170;
 /** The big boulder is broad and low, so a small spider can walk over its top. */
 export const BOULDER_RADIUS = 150;
 const BOULDER_HEIGHT = 52;
+
+/** A pond is wide enough for a few fish to swim around in. */
+export const POND_RADIUS = 125;
 
 /** How far the hill reaches behind its center, where it meets the ground. */
 export const HOUSE_RADIUS = 210;
@@ -72,14 +80,16 @@ const viewOf = (r: terrain.Rock$): RockView => {
 
 /**
  * The same rocks every time, less the ones `keep` turns down and the ones too
- * close to a house, the crevasse or the big boulder. A house mound stands at
- * each of `homes`. `boulder` is the center of the big boulder.
+ * close to a house, the crevasse, the big boulder or the pond. A house mound
+ * stands at each of `homes`. `boulder` is the center of the big boulder, and
+ * `pond` the center of the pond.
  */
 export function scatterRocks(
   keep: (rock: RockView) => boolean = () => true,
   homes: V3[] = [],
   crevasse: CrevasseSpot | null = null,
   boulder: V3 | null = null,
+  pond: V3 | null = null,
 ): Land {
   // `homes` are door spots; each hill sits behind its door.
   const houses: HouseView[] = homes.map((d, index) => {
@@ -105,8 +115,11 @@ export function scatterRocks(
         crevasse.bridge * Math.hypot(crevasse.to.x - crevasse.from.x, crevasse.to.z - crevasse.from.z),
       )
     : null;
+  const water: PondView[] = pond
+    ? [{ center: pond, radius: POND_RADIUS, pond: terrain.Pond$Pond(toV3(pond), POND_RADIUS) }]
+    : [];
   const clear = (r: RockView) =>
-    [...houses, ...(big ? [big] : [])].every(
+    [...houses, ...(big ? [big] : []), ...water].every(
       (h) => Math.hypot(r.center.x - h.center.x, r.center.z - h.center.z) > h.radius + r.radius + YARD,
     ) &&
     (!crevasse || distanceToLine(r.center, crevasse.from, crevasse.to) > r.radius + CREVASSE_WIDTH / 2 + YARD);
@@ -116,11 +129,13 @@ export function scatterRocks(
     ground: terrain.Terrain$Terrain(
       fromArray([...rocks, ...houses].map((r) => r.rock)),
       fromArray(crack ? [crack] : []),
+      fromArray(water.map((w) => w.pond)),
     ),
     rocks,
     houses,
     mounds: [...rocks, ...houses],
     crevasses: crack ? [crevasseView(crack)] : [],
+    ponds: water,
   };
 }
 

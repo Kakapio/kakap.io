@@ -20,6 +20,7 @@ fn ground() -> terrain.Terrain {
         360.0,
       ),
     ],
+    [],
   )
 }
 

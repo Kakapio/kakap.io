@@ -1,3 +1,4 @@
+import * as forage from "@gleam/sim/sim/forage.mjs";
 import * as rabbits from "@gleam/sim/sim/rabbits.mjs";
 import * as vec3 from "@gleam/sim/sim/vec3.mjs";
 import { Result$isOk, Result$Ok$0 } from "@gleam/prelude.mjs";
@@ -23,6 +24,10 @@ export type RabbitView = {
   indoors: boolean;
   /** Running for its door. */
   goingHome: boolean;
+  /** Walking to a patch of food. */
+  foraging: boolean;
+  /** Eating at a patch of food. */
+  eating: boolean;
   home: number;
 };
 
@@ -78,22 +83,50 @@ export const findPaths = (ground: Terrain, doors: V3[], bounds: Bounds): Paths =
 export const updatePaths = (paths: Paths, herd: Herd, dt: number): Paths =>
   rabbits.update_paths(paths, fromArray(herd), dt);
 
+/** The patches of food that are up, and when the next one sprouts. */
+export type Garden = forage.Garden$;
+
+/** A garden with no patches yet. */
+export const NO_FOOD: Garden = forage.bare;
+
+/** `left` is the share of the patch that is not eaten yet, from 0 to 1. */
+export type PatchView = { id: number; position: V3; left: number };
+
+const patchesOf = (garden: Garden) => forage.Garden$Garden$patches(garden);
+
+export function patches(garden: Garden): PatchView[] {
+  return toArray(patchesOf(garden)).map((p) => ({
+    id: forage.Patch$Patch$id(p),
+    position: fromV3(forage.Patch$Patch$position(p)),
+    left: forage.Patch$Patch$food(p) / forage.meals,
+  }));
+}
+
+/** The paths with a way to each patch of the garden. A way is built once, when its patch is new. */
+export const foodPaths = (paths: Paths, garden: Garden): Paths => rabbits.food_paths(paths, patchesOf(garden));
+
+/** The garden `dt` later: the rabbits that eat take their share, and new patches sprout on open ground. */
+export const tend = (garden: Garden, herd: Herd, ground: Terrain, doors: V3[], paths: Paths, bounds: Bounds, dt: number): Garden =>
+  rabbits.tend(garden, fromArray(herd), ground, fromArray(doors.map(toV3)), paths, toBounds(bounds), dt);
+
 export function step(
   herd: Herd,
   ground: Terrain,
   spiders: V3[],
   doors: V3[],
+  garden: Garden,
   paths: Paths,
   bounds: Bounds,
   dt: number,
   cfg: RabbitConfig,
 ): Herd {
   return toArray(
-    rabbits.step_around(
+    rabbits.step_foraging(
       fromArray(herd),
       ground,
       fromArray(spiders.map(toV3)),
       fromArray(doors.map(toV3)),
+      patchesOf(garden),
       paths,
       toBounds(bounds),
       dt,
@@ -112,6 +145,8 @@ export const LIMITS = {
   wallMargin: rabbits.wall_margin,
   /** A rabbit this close to its door goes in. */
   doorReach: rabbits.door_reach,
+  /** A rabbit this close to a patch of food eats from it. */
+  eatReach: rabbits.eat_reach,
   /** A calm rabbit keeps away from a spider from this many fear radii out. */
   wary: rabbits.wary,
 };
@@ -129,13 +164,13 @@ export function ways(paths: Paths): { grid: Grid | null; doors: Field[]; huddle:
 
 /**
  * The point each rabbit heads for along its way, in herd order: null for a
- * rabbit that is indoors, flees, or is alone outside.
+ * rabbit that is indoors, flees, eats, or is alone outside with nowhere to go.
  */
-export function aims(herd: Herd, doors: V3[], paths: Paths): (V3 | null)[] {
+export function aims(herd: Herd, doors: V3[], garden: Garden, paths: Paths): (V3 | null)[] {
   const all = fromArray(herd);
   const doorList = fromArray(doors.map(toV3));
   return herd.map((r) => {
-    const aim = rabbits.aim(r, all, doorList, paths);
+    const aim = rabbits.aim(r, all, doorList, patchesOf(garden), paths);
     return Result$isOk(aim) ? fromV3(Result$Ok$0(aim)!) : null;
   });
 }
@@ -163,6 +198,8 @@ export function view(herd: Herd, cfg: RabbitConfig): RabbitView[] {
       hop: rabbits.Rabbit$Rabbit$hop(r),
       indoors: rabbits.is_indoors(r),
       goingHome: rabbits.Shelter$isGoingHome(rabbits.Rabbit$Rabbit$shelter(r)),
+      foraging: rabbits.Errand$isForaging(rabbits.Rabbit$Rabbit$errand(r)),
+      eating: rabbits.Errand$isEating(rabbits.Rabbit$Rabbit$errand(r)),
       home: rabbits.Rabbit$Rabbit$home(r),
     };
   });

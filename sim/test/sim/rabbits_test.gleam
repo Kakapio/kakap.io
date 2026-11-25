@@ -1,5 +1,6 @@
 import gleam/float
 import gleam/list
+import sim/forage.{Garden, Patch}
 import sim/rabbits.{type Config, type Rabbit, Bounds, Config, Indoors, Outside}
 import sim/terrain.{Terrain}
 import sim/vec3.{type Vec3, Vec3}
@@ -119,7 +120,7 @@ pub fn rabbits_stay_inside_the_bounds_test() {
 
 pub fn rabbits_run_around_rocks_test() {
   let rock = terrain.rock(Vec3(0.0, 0.0, 0.0), 80.0, 50.0)
-  let ground = Terrain([rock], [])
+  let ground = Terrain([rock], [], [])
   let start = rabbits.herd(6, around: Vec3(-300.0, 0.0, 0.0), spread: 60.0)
   let spider = Vec3(-450.0, 0.0, 0.0)
   let #(_, ok) =
@@ -170,7 +171,19 @@ pub fn rabbits_run_away_from_the_closest_of_two_spiders_test() {
 }
 
 fn rabbit_at(id: Int, at: Vec3, fear: Float) -> Rabbit {
-  rabbits.Rabbit(id, at, vec3.zero, 0.0, fear, 0.0, 0.0, 0, Outside)
+  rabbits.Rabbit(
+    id,
+    at,
+    vec3.zero,
+    0.0,
+    fear,
+    0.0,
+    0.0,
+    0,
+    Outside,
+    0.0,
+    rabbits.Idle,
+  )
 }
 
 fn run_home(
@@ -244,7 +257,7 @@ pub fn a_rabbit_crosses_a_crevasse_at_the_bridge_to_get_home_test() {
       170.0,
       300.0,
     )
-  let ground = Terrain([], [crack])
+  let ground = Terrain([], [crack], [])
   let door = Vec3(-150.0, 0.0, 250.0)
   let paths = rabbits.find_paths(ground, doors: [door], within: bounds)
   let runner =
@@ -258,6 +271,8 @@ pub fn a_rabbit_crosses_a_crevasse_at_the_bridge_to_get_home_test() {
       5.0,
       0,
       rabbits.GoingHome,
+      0.0,
+      rabbits.Idle,
     )
   let #(after, safe, crossed) =
     list.fold(list.repeat(Nil, 600), #([runner], True, False), fn(acc, _) {
@@ -334,7 +349,7 @@ const hill = terrain.Hill(Vec3(0.0, 0.0, 0.0), 210.0, 95.0, 50.0, 0.4363)
 const hill_door = Vec3(0.0, 0.0, -64.0)
 
 pub fn a_rabbit_behind_its_house_runs_around_it_to_the_door_test() {
-  let ground = Terrain([hill], [])
+  let ground = Terrain([hill], [], [])
   let paths = rabbits.find_paths(ground, doors: [hill_door], within: bounds)
   let runner =
     rabbits.Rabbit(
@@ -347,6 +362,8 @@ pub fn a_rabbit_behind_its_house_runs_around_it_to_the_door_test() {
       5.0,
       0,
       rabbits.GoingHome,
+      0.0,
+      rabbits.Idle,
     )
   let run = fn(paths) {
     list.fold(list.repeat(Nil, 240), #([runner], False), fn(acc, _) {
@@ -371,7 +388,7 @@ pub fn a_rabbit_behind_its_house_runs_around_it_to_the_door_test() {
 }
 
 pub fn a_calm_rabbit_walks_around_a_hill_to_its_group_test() {
-  let ground = Terrain([hill], [])
+  let ground = Terrain([hill], [], [])
   let door = [hill_door]
   let herd = [
     rabbit_at(0, Vec3(0.0, 0.0, 260.0), 0.0),
@@ -401,4 +418,104 @@ pub fn a_calm_rabbit_walks_around_a_hill_to_its_group_test() {
   assert spread_from_center(together) <. 90.0
   // Heading straight for the group, the lone rabbit stays behind the hill.
   assert spread_from_center(walk(rabbits.no_paths)) >. 150.0
+}
+
+/// A hungry rabbit, its herd and a patch, run for `frames` frames with the
+/// garden tended each frame.
+fn graze(
+  herd: List(Rabbit),
+  garden: forage.Garden,
+  frames: Int,
+) -> #(List(Rabbit), forage.Garden) {
+  let ground = Terrain([], [], [])
+  let paths = rabbits.find_paths(ground, doors: [], within: bounds)
+  list.fold(list.repeat(Nil, frames), #(herd, garden), fn(acc, _) {
+    let #(herd, garden) = acc
+    let paths = rabbits.food_paths(paths, to: garden.patches)
+    let next =
+      rabbits.step_foraging(
+        herd,
+        ground,
+        from: [far_away],
+        doors: [],
+        food: garden.patches,
+        paths:,
+        within: bounds,
+        dt: dt,
+        config: config(),
+      )
+    #(
+      next,
+      rabbits.tend(
+        garden,
+        eaten_by: next,
+        on: ground,
+        doors: [],
+        paths:,
+        within: bounds,
+        dt: dt,
+      ),
+    )
+  })
+}
+
+fn hungry(id: Int, at: Vec3) -> Rabbit {
+  rabbits.Rabbit(..rabbit_at(id, at, 0.0), hunger: 1.0)
+}
+
+pub fn a_hungry_rabbit_walks_to_food_and_eats_test() {
+  let patch = Patch(0, Vec3(300.0, 0.0, 0.0), 3.0)
+  // A long wait, so that no other patch sprouts.
+  let garden = Garden([patch], 1, 1000.0)
+  let start = [hungry(0, Vec3(0.0, 0.0, 0.0))]
+  // It walks 300 units at 70 a second, then eats for a little over 4 seconds.
+  let #(herd, garden) = graze(start, garden, 360)
+  let assert [r] = herd
+  assert r.errand == rabbits.Eating(0)
+  assert vec3.ground_distance(r.position, patch.position) <. rabbits.eat_reach
+  let #(herd, garden) = graze(herd, garden, 240)
+  let assert [r] = herd
+  assert r.errand == rabbits.Idle
+  assert r.hunger <. 0.2
+  let assert [left] = garden.patches
+  // It ate a meal, and a little more for the hunger it got on the walk.
+  assert left.food <. 2.0 && left.food >. 1.7
+}
+
+pub fn a_full_rabbit_leaves_food_alone_test() {
+  let garden = Garden([Patch(0, Vec3(300.0, 0.0, 0.0), 3.0)], 1, 1000.0)
+  let #(herd, garden) =
+    graze([rabbit_at(0, Vec3(0.0, 0.0, 0.0), 0.0)], garden, 300)
+  let assert [r] = herd
+  assert r.errand == rabbits.Idle
+  assert vec3.ground_distance(r.position, Vec3(0.0, 0.0, 0.0)) <. 5.0
+  let assert [left] = garden.patches
+  assert left.food == 3.0
+}
+
+pub fn a_scared_rabbit_drops_its_meal_test() {
+  let garden = Garden([Patch(0, Vec3(300.0, 0.0, 0.0), 3.0)], 1, 1000.0)
+  let scared =
+    rabbits.Rabbit(
+      ..hungry(0, Vec3(0.0, 0.0, 0.0)),
+      fear: 1.0,
+      errand: rabbits.Foraging(0),
+    )
+  let #(herd, _) = graze([scared], garden, 1)
+  let assert [r] = herd
+  assert r.errand == rabbits.Idle
+}
+
+pub fn an_eaten_patch_goes_and_new_ones_sprout_test() {
+  let garden = Garden([Patch(0, Vec3(300.0, 0.0, 0.0), 0.0)], 1, 0.0)
+  // 40 seconds is time for every patch to sprout, with some failed tries.
+  let #(_, garden) = graze([], garden, 2400)
+  assert list.length(garden.patches) == forage.most
+  assert list.all(garden.patches, fn(p) { p.id != 0 && p.food == forage.meals })
+  // Patches keep apart.
+  assert list.all(garden.patches, fn(a) {
+    list.all(garden.patches, fn(b) {
+      a.id == b.id || vec3.ground_distance(a.position, b.position) >. 150.0
+    })
+  })
 }

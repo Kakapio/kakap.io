@@ -1,6 +1,6 @@
 import type { Camera, V3 } from "./camera";
 import { type Field, type Grid, type GridView, gridView } from "./nav-sim";
-import { type Bounds, LIMITS, type RabbitView } from "./rabbit-sim";
+import { type Bounds, LIMITS, type PatchView, type RabbitView } from "./rabbit-sim";
 import { BRIDGE_HALF, footprint, type Land } from "./terrain-sim";
 
 /** The colors of the debug view. The legend in `debug-panel.ts` uses them too. */
@@ -34,6 +34,7 @@ export type DebugScene = {
   rabbits: RabbitView[];
   /** The point each rabbit heads for, in the order of `rabbits`. */
   aims: (V3 | null)[];
+  food: PatchView[];
   /** The center of the rabbits that are outside. */
   huddle: V3 | null;
   spacing: number;
@@ -189,7 +190,8 @@ function drawBounds(ctx: CanvasRenderingContext2D, cam: Camera, b: Bounds) {
 /**
  * Each rock and house as the sim sees it: its footprint, the line a rabbit's
  * center cannot cross, and the line where it starts to push a rabbit away.
- * Each crevasse as its rims, with the path over its bridge.
+ * Each crevasse as its rims, with the path over its bridge. Each pond as its
+ * edge, with the same two lines as a rock.
  */
 function drawObstacles(ctx: CanvasRenderingContext2D, cam: Camera, land: Land) {
   const color = DEBUG_COLORS.obstacle;
@@ -198,6 +200,12 @@ function drawObstacles(ctx: CanvasRenderingContext2D, cam: Camera, land: Land) {
     // The footprint grown by `grow`: the circle and the wall both move out.
     const outline = (grow: number) =>
       ring(f.center, f.radius + grow).map((p) => cam.project({ ...p, z: Math.max(p.z, f.wallZ - grow) }));
+    stroke(ctx, outline(0), color, 2);
+    stroke(ctx, outline(LIMITS.rockPad), color, 1);
+    stroke(ctx, outline(LIMITS.rockMargin), color, 1, [4, 5]);
+  }
+  for (const pond of land.ponds) {
+    const outline = (grow: number) => ring(pond.center, pond.radius + grow).map((p) => cam.project(p));
     stroke(ctx, outline(0), color, 2);
     stroke(ctx, outline(LIMITS.rockPad), color, 1);
     stroke(ctx, outline(LIMITS.rockMargin), color, 1, [4, 5]);
@@ -216,13 +224,18 @@ function drawObstacles(ctx: CanvasRenderingContext2D, cam: Camera, land: Land) {
   }
 }
 
-/** Each door with the distance at which a rabbit goes in, and the huddle with its radius. */
+/** Each door with the distance at which a rabbit goes in, each patch of food with the distance at which a rabbit eats, and the huddle with its radius. */
 function drawDoors(ctx: CanvasRenderingContext2D, cam: Camera, scene: DebugScene) {
   scene.land.houses.forEach((house, i) => {
     stroke(ctx, ring(house.door, LIMITS.doorReach).map((p) => cam.project(p)), DEBUG_COLORS.door, 2);
     const at = cam.project(house.door);
     label(ctx, `door ${i}`, at.x, at.y + 16 * at.scale + 12);
   });
+  for (const patch of scene.food) {
+    stroke(ctx, ring(patch.position, LIMITS.eatReach).map((p) => cam.project(p)), DEBUG_COLORS.door, 2);
+    const at = cam.project(patch.position);
+    label(ctx, `food ${patch.id}: ${Math.round(patch.left * 100)}%`, at.x, at.y + LIMITS.eatReach * at.scale + 12);
+  }
   if (!scene.huddle) return;
   stroke(ctx, ring(scene.huddle, scene.huddleRadius).map((p) => cam.project(p)), DEBUG_COLORS.door, 1, [3, 5]);
   cross(ctx, cam.project(scene.huddle), 5, DEBUG_COLORS.door, 1.5);
@@ -260,7 +273,7 @@ function drawRabbits(ctx: CanvasRenderingContext2D, cam: Camera, scene: DebugSce
     // Where the rabbit will be in a quarter of a second at this velocity.
     const ahead = cam.project({ x: r.position.x + r.velocity.x * 0.25, y: 0, z: r.position.z + r.velocity.z * 0.25 });
     stroke(ctx, [at, ahead], color, 2.5);
-    const state = r.goingHome ? "home" : r.fleeing ? "flee" : "calm";
+    const state = r.goingHome ? "home" : r.fleeing ? "flee" : r.eating ? "eat" : r.foraging ? "forage" : "calm";
     label(ctx, `${state} ${r.fear.toFixed(2)}`, at.x, at.y + 14);
   });
 }

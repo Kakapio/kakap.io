@@ -312,7 +312,9 @@ function drawRabbit(
   }
 
   // Ears: an ink stroke with a fur stroke on top reads as an outlined ear.
-  const head = at(2, 33, 20);
+  // A rabbit that eats leans down and nibbles.
+  const nibble = r.eating ? 5 + 1.5 * Math.sin(time * 14 + r.id) : 0;
+  const head = at(2 + (r.eating ? 4 : 0), 33 - nibble, 20);
   const twitch = r.fleeing
     ? 0
     : Math.max(0, Math.sin(time * 1.3 + r.id * 2.1)) ** 12 * 0.5;

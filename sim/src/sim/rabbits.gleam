@@ -5,12 +5,16 @@
 ////
 //// A rabbit that stays scared for too long runs home and hides indoors. It
 //// comes out again once no spider is near its door.
+////
+//// A calm rabbit gets hungry. A hungry rabbit walks to a patch of food, eats
+//// until it is full, and then goes back to the herd.
 
 import gleam/float
 import gleam/int
 import gleam/list
 import gleam_community/maths
 import sim/angle
+import sim/forage.{type Garden, type Patch}
 import sim/nav
 import sim/terrain.{type Terrain}
 import sim/vec3.{type Vec3, Vec3}
@@ -44,9 +48,19 @@ pub type Shelter {
   Indoors(time: Float)
 }
 
+/// What a calm rabbit is doing about food.
+pub type Errand {
+  Idle
+  /// Walking to the patch with this id.
+  Foraging(patch: Int)
+  /// Eating at the patch with this id.
+  Eating(patch: Int)
+}
+
 /// `fear` runs from 0 (calm) to 1 (panic). `hop` is the hop cycle phase in
 /// radians. `dread` is how long the rabbit has been scared, in seconds; it
-/// fades while the rabbit is calm. `home` is the index of its house.
+/// fades while the rabbit is calm. `home` is the index of its house. `hunger`
+/// grows from 0 (full); at 1 the rabbit goes to look for food.
 pub type Rabbit {
   Rabbit(
     id: Int,
@@ -58,6 +72,8 @@ pub type Rabbit {
     dread: Float,
     home: Int,
     shelter: Shelter,
+    hunger: Float,
+    errand: Errand,
   )
 }
 
@@ -101,6 +117,22 @@ const all_clear = 1.3
 /// so it steers around spiders instead of walking into their range.
 pub const wary = 1.2
 
+/// A rabbit this close to a patch of food eats from it.
+pub const eat_reach = 30.0
+
+/// Hunger lost per second while eating, and meals a patch loses per second
+/// to each rabbit that eats from it.
+const eat_rate = 0.25
+
+/// Hunger stops growing here.
+const hunger_cap = 1.5
+
+/// A patch of food sprouts at least this far from rocks, crevasses and ponds.
+const food_room = 55.0
+
+/// A patch of food sprouts at least this far from doors and other patches.
+const food_apart = 170.0
+
 /// The width of a cell of the grid the rabbits find their way on.
 const path_cell = 24.0
 
@@ -108,19 +140,21 @@ const path_cell = 24.0
 const huddle_period = 1.0
 
 /// The ways the rabbits know around the obstacles: one field to each house
-/// door, in house order, and one to the huddle. The huddle moves, so its
-/// field is built again every `huddle_period`.
+/// door, in house order, one to the huddle, and one to each patch of food,
+/// by patch id. The huddle moves, so its field is built again every
+/// `huddle_period`.
 pub opaque type Paths {
   Paths(
     grid: Result(nav.Grid, Nil),
     doors: List(nav.Field),
     huddle: Result(nav.Field, Nil),
     age: Float,
+    meals: List(#(Int, nav.Field)),
   )
 }
 
 /// No ways: every rabbit heads straight for where it wants to go.
-pub const no_paths = Paths(Error(Nil), [], Error(Nil), 0.0)
+pub const no_paths = Paths(Error(Nil), [], Error(Nil), 0.0, [])
 
 /// The ways around the obstacles on `ground`, inside `bounds`, to each of
 /// `doors`. Build this again when any of the three changes.
@@ -138,7 +172,25 @@ pub fn find_paths(
       cell: path_cell,
       blocked: blocked(_, ground, bounds),
     )
-  Paths(Ok(grid), list.map(doors, nav.field(grid, _)), Error(Nil), 0.0)
+  Paths(Ok(grid), list.map(doors, nav.field(grid, _)), Error(Nil), 0.0, [])
+}
+
+/// The paths with a way to each patch of `food`, and to no other patch. A
+/// way is built once, when its patch is new.
+pub fn food_paths(paths: Paths, to food: List(Patch)) -> Paths {
+  case paths.grid {
+    Error(Nil) -> paths
+    Ok(grid) ->
+      Paths(
+        ..paths,
+        meals: list.map(food, fn(patch) {
+          case list.key_find(paths.meals, patch.id) {
+            Ok(way) -> #(patch.id, way)
+            Error(Nil) -> #(patch.id, nav.field(grid, patch.position))
+          }
+        }),
+      )
+  }
 }
 
 /// The paths `dt` later. The way to the huddle is built again when it is
@@ -176,12 +228,14 @@ pub fn huddle_way(paths: Paths) -> Result(nav.Field, Nil) {
 }
 
 /// The point `rabbit` heads for along its way this frame: toward its door
-/// when it runs home, and toward the rest of the herd when it is calm. It is
-/// an error for a rabbit that is indoors, flees, or is alone outside.
+/// when it runs home, toward its patch when it goes to eat, and toward the
+/// rest of the herd when it is calm. It is an error for a rabbit that is
+/// indoors, flees, eats, or is alone outside with nowhere to go.
 pub fn aim(
   rabbit: Rabbit,
   among rabbits: List(Rabbit),
   doors doors: List(Vec3),
+  food food: List(Patch),
   paths paths: Paths,
 ) -> Result(Vec3, Nil) {
   let door = list.drop(doors, rabbit.home) |> list.first
@@ -190,18 +244,103 @@ pub fn aim(
     list.filter(rabbits, fn(other) {
       other.id != rabbit.id && !is_indoors(other)
     })
-  case rabbit.shelter, door, others {
-    Indoors(_), _, _ -> Error(Nil)
-    GoingHome, Ok(door), _ ->
-      Ok(follow(way_home, from: rabbit.position, to: door))
-    _, _, [] -> Error(Nil)
-    _, _, _ ->
-      case is_fleeing(rabbit) {
-        True -> Error(Nil)
-        False ->
+  case rabbit.shelter, door {
+    Indoors(_), _ -> Error(Nil)
+    GoingHome, Ok(door) -> Ok(follow(way_home, from: rabbit.position, to: door))
+    _, _ ->
+      case is_fleeing(rabbit), rabbit.errand, others {
+        True, _, _ | _, Eating(_), _ | _, Idle, [] -> Error(Nil)
+        _, Foraging(id), _ ->
+          case forage.find(food, id) {
+            Ok(patch) ->
+              Ok(follow(
+                list.key_find(paths.meals, id),
+                from: rabbit.position,
+                to: patch.position,
+              ))
+            Error(Nil) -> Error(Nil)
+          }
+        _, Idle, _ ->
           Ok(follow(paths.huddle, from: rabbit.position, to: centroid(others)))
       }
   }
+}
+
+/// The garden `dt` later: each rabbit that eats takes its share from its
+/// patch, empty patches go, and a new patch sprouts when it is time. A patch
+/// sprouts on open ground that the rabbits can walk to, away from the
+/// `doors` and from the other patches.
+pub fn tend(
+  garden: Garden,
+  eaten_by rabbits: List(Rabbit),
+  on ground: Terrain,
+  doors doors: List(Vec3),
+  paths paths: Paths,
+  within bounds: Bounds,
+  dt dt: Float,
+) -> Garden {
+  let grazed =
+    list.fold(rabbits, garden, fn(garden, rabbit) {
+      case rabbit.errand {
+        Eating(id) -> forage.eat(garden, from: id, amount: eat_rate *. dt)
+        _ -> garden
+      }
+    })
+  let taken =
+    list.append(doors, list.map(grazed.patches, fn(patch) { patch.position }))
+  forage.grow(grazed, dt:, spot: food_spot(_, ground, taken, paths, bounds))
+}
+
+/// A place for a patch of food, picked from `seed`. It is an error when the
+/// place is blocked, cut off, or too close to an obstacle or to one of
+/// `taken`.
+fn food_spot(
+  seed: Int,
+  ground: Terrain,
+  taken: List(Vec3),
+  paths: Paths,
+  bounds: Bounds,
+) -> Result(Vec3, Nil) {
+  let inset = wall_margin +. 30.0
+  let between = fn(low: Float, high: Float, k: Int) {
+    low +. inset +. { high -. low -. 2.0 *. inset } *. chance(seed, k)
+  }
+  let at =
+    Vec3(
+      between(bounds.min_x, bounds.max_x, 1),
+      0.0,
+      between(bounds.min_z, bounds.max_z, 2),
+    )
+  let open = case paths.grid {
+    Ok(grid) -> nav.is_open(grid, at)
+    Error(Nil) -> True
+  }
+  let reachable = case paths.doors {
+    [way, ..] -> nav.reaches(way, from: at)
+    [] -> True
+  }
+  let roomy =
+    vec3.ground_distance(at, terrain.push_out(ground, at, food_room)) <. 0.5
+  let apart =
+    list.all(taken, fn(t) { vec3.ground_distance(at, t) >. food_apart })
+  case open && reachable && roomy && apart {
+    True -> Ok(at)
+    False -> Error(Nil)
+  }
+}
+
+/// A repeatable value in [0, 1) for `seed` and channel `k`.
+fn chance(seed: Int, k: Int) -> Float {
+  let x =
+    maths.sin(int.to_float(seed) *. 12.9898 +. int.to_float(k) *. 78.233 +. 0.5)
+    *. 43_758.5453
+  x -. float.floor(x)
+}
+
+/// Hunger gained per second. Each rabbit has its own appetite: it gets
+/// hungry in 18 to 34 seconds.
+fn appetite(rabbit: Rabbit) -> Float {
+  1.0 /. { 18.0 +. 16.0 *. chance(rabbit.id, 3) }
 }
 
 /// `count` rabbits on a sunflower spiral of radius `spread` around `center`.
@@ -225,6 +364,9 @@ pub fn herd(
       0.0,
       0,
       Outside,
+      // The herd does not get hungry all at once.
+      0.9 *. chance(i, 5),
+      Idle,
     )
   })
 }
@@ -313,6 +455,32 @@ pub fn step_around(
   dt dt: Float,
   config config: Config,
 ) -> List(Rabbit) {
+  step_foraging(
+    rabbits,
+    ground,
+    from: spiders,
+    doors:,
+    food: [],
+    paths:,
+    within: bounds,
+    dt:,
+    config:,
+  )
+}
+
+/// The same as `step_around`, with patches of `food` for hungry rabbits to
+/// walk to and eat. `paths` holds a way to each patch.
+pub fn step_foraging(
+  rabbits: List(Rabbit),
+  ground: Terrain,
+  from spiders: List(Vec3),
+  doors doors: List(Vec3),
+  food food: List(Patch),
+  paths paths: Paths,
+  within bounds: Bounds,
+  dt dt: Float,
+  config config: Config,
+) -> List(Rabbit) {
   list.map(rabbits, fn(rabbit) {
     let door = list.drop(doors, rabbit.home) |> list.first
     let way_home = list.drop(paths.doors, rabbit.home) |> list.first
@@ -330,6 +498,8 @@ pub fn step_around(
           spiders,
           door,
           #(way_home, paths.huddle),
+          food,
+          paths.meals,
           bounds,
           dt,
           config,
@@ -379,6 +549,8 @@ fn step_one(
   spiders: List(Vec3),
   door: Result(Vec3, Nil),
   ways: #(Result(nav.Field, Nil), Result(nav.Field, Nil)),
+  food: List(Patch),
+  meals: List(#(Int, nav.Field)),
   bounds: Bounds,
   dt: Float,
   config: Config,
@@ -392,6 +564,30 @@ fn step_one(
   let shelter = case rabbit.shelter, door {
     Outside, Ok(_) if dread >=. dread_limit -> GoingHome
     shelter, _ -> shelter
+  }
+  let calm = fear <=. panic_level && shelter == Outside
+  let errand = case calm, rabbit.errand {
+    False, _ -> Idle
+    True, Idle ->
+      case rabbit.hunger >=. 1.0 {
+        True -> choose_patch(rabbit, food, spiders, config)
+        False -> Idle
+      }
+    True, Foraging(id) | True, Eating(id) ->
+      case forage.find(food, id), rabbit.hunger >. 0.0 {
+        Ok(patch), True ->
+          case
+            vec3.ground_distance(rabbit.position, patch.position) <. eat_reach
+          {
+            True -> Eating(id)
+            False -> Foraging(id)
+          }
+        _, _ -> Idle
+      }
+  }
+  let hunger = case errand {
+    Eating(_) -> float.max(0.0, rabbit.hunger -. dt *. eat_rate)
+    _ -> float.min(hunger_cap, rabbit.hunger +. dt *. appetite(rabbit))
   }
   let separation = personal_space(rabbit, others, config.spacing)
   let group = case others {
@@ -420,19 +616,40 @@ fn step_one(
       |> steer(rabbit, _, ground, spiders, bounds, config)
       |> vec3.scale(config.run_speed *. fear)
     _, _, False -> {
-      let to_group = vec3.flat(vec3.subtract(group, rabbit.position))
-      let pull =
-        float.clamp(
-          { vec3.length(to_group) -. config.huddle_radius } /. 100.0,
-          min: 0.0,
-          max: 1.0,
-        )
-      // The way to the group goes around anything that is between.
-      let way =
-        follow(way_to_huddle, from: rabbit.position, to: group)
-        |> vec3.subtract(rabbit.position)
-        |> vec3.flat
-      vec3.scale(vec3.normalize(way), config.walk_speed *. pull)
+      let way = case errand {
+        // A rabbit that eats stays where it is.
+        Eating(_) -> vec3.zero
+        Foraging(id) ->
+          case forage.find(food, id) {
+            Ok(patch) ->
+              follow(
+                list.key_find(meals, id),
+                from: rabbit.position,
+                to: patch.position,
+              )
+              |> vec3.subtract(rabbit.position)
+              |> vec3.flat
+              |> vec3.normalize
+              |> vec3.scale(config.walk_speed)
+            Error(Nil) -> vec3.zero
+          }
+        Idle -> {
+          let to_group = vec3.flat(vec3.subtract(group, rabbit.position))
+          let pull =
+            float.clamp(
+              { vec3.length(to_group) -. config.huddle_radius } /. 100.0,
+              min: 0.0,
+              max: 1.0,
+            )
+          // The way to the group goes around anything that is between.
+          follow(way_to_huddle, from: rabbit.position, to: group)
+          |> vec3.subtract(rabbit.position)
+          |> vec3.flat
+          |> vec3.normalize
+          |> vec3.scale(config.walk_speed *. pull)
+        }
+      }
+      way
       |> vec3.add(vec3.scale(separation, config.walk_speed *. 1.5))
       |> vec3.add(vec3.scale(
         keep_away(rabbit, spiders, config),
@@ -478,6 +695,8 @@ fn step_one(
             fear: fear,
             dread: dread,
             shelter: Indoors(0.0),
+            hunger:,
+            errand: Idle,
           )
         False ->
           Rabbit(
@@ -489,6 +708,8 @@ fn step_one(
             hop:,
             dread:,
             shelter: GoingHome,
+            hunger:,
+            errand:,
           )
       }
     _, _ ->
@@ -501,7 +722,46 @@ fn step_one(
         hop:,
         dread:,
         shelter:,
+        hunger:,
+        errand:,
       )
+  }
+}
+
+/// The errand of a hungry rabbit: to walk to the nearest patch that has food
+/// and is out of every spider's wary range, or none when there is no such
+/// patch.
+fn choose_patch(
+  rabbit: Rabbit,
+  food: List(Patch),
+  spiders: List(Vec3),
+  config: Config,
+) -> Errand {
+  let gap = fn(patch: Patch) {
+    vec3.ground_distance(rabbit.position, patch.position)
+  }
+  let safe = fn(patch: Patch) {
+    list.all(spiders, fn(spider) {
+      vec3.ground_distance(patch.position, spider) >. config.fear_radius *. wary
+    })
+  }
+  food
+  |> list.filter(fn(patch) { patch.food >. 0.0 && safe(patch) })
+  |> list.fold(Error(Nil), fn(best: Result(Patch, Nil), patch) {
+    case best {
+      Ok(b) ->
+        case gap(b) <=. gap(patch) {
+          True -> best
+          False -> Ok(patch)
+        }
+      Error(Nil) -> Ok(patch)
+    }
+  })
+  |> fn(best) {
+    case best {
+      Ok(patch) -> Foraging(patch.id)
+      Error(Nil) -> Idle
+    }
   }
 }
 

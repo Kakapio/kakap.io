@@ -11,6 +11,9 @@
 ////
 //// A crevasse is a long, deep crack in the ground with jagged rims. Its
 //// surface is below zero. It can have one bridge across it.
+////
+//// A pond is a round pool of shallow water, level with the ground. A spider
+//// wades through it. A walker that cannot swim keeps out of it.
 
 import gleam/float
 import gleam/int
@@ -37,11 +40,15 @@ pub type Crevasse {
   Crevasse(from: Vec3, to: Vec3, width: Float, depth: Float, bridge: Float)
 }
 
-pub type Terrain {
-  Terrain(rocks: List(Rock), crevasses: List(Crevasse))
+pub type Pond {
+  Pond(center: Vec3, radius: Float)
 }
 
-pub const flat = Terrain([], [])
+pub type Terrain {
+  Terrain(rocks: List(Rock), crevasses: List(Crevasse), ponds: List(Pond))
+}
+
+pub const flat = Terrain([], [], [])
 
 /// Rocks on a jittered grid of `cell`-wide squares that covers the rectangle.
 /// About half the cells get a rock. The same inputs give the same rocks.
@@ -75,7 +82,7 @@ pub fn scatter(
         }
       })
     })
-  Terrain(rocks, [])
+  Terrain(rocks, [], [])
 }
 
 /// The height of the ground surface at `p`, ignoring `p.y`.
@@ -474,8 +481,8 @@ pub fn place(terrain: Terrain, p: Vec3) -> Vec3 {
   Vec3(p.x, height(terrain, p), p.z)
 }
 
-/// A push away from every rock and crevasse whose edge is closer than `margin`. It grows
-/// from 0 at `margin` to 1 at the edge, and more inside the rock.
+/// A push away from every rock, crevasse and pond whose edge is closer than
+/// `margin`. It grows from 0 at `margin` to 1 at the edge, and more inside.
 pub fn avoid(terrain: Terrain, p: Vec3, margin: Float) -> Vec3 {
   list.fold(edges(terrain, p), vec3.zero, fn(push, edge) {
     let #(gap, out) = edge
@@ -487,13 +494,15 @@ pub fn avoid(terrain: Terrain, p: Vec3, margin: Float) -> Vec3 {
   })
 }
 
-/// `p` moved out to `pad` past the edge of any rock or crevasse it is inside.
+/// `p` moved out to `pad` past the edge of any rock, crevasse or pond it is
+/// inside.
 pub fn push_out(terrain: Terrain, p: Vec3, pad: Float) -> Vec3 {
   let obstacles =
-    list.append(
+    list.flatten([
       list.map(terrain.rocks, fn(rock) { edge(rock, _) }),
       list.map(terrain.crevasses, fn(c) { crevasse_edge(c, _) }),
-    )
+      list.map(terrain.ponds, fn(pond) { pond_edge(pond, _) }),
+    ])
   list.fold(obstacles, p, fn(p, edge_of) {
     let #(gap, out) = edge_of(p)
     case gap <. pad {
@@ -503,12 +512,24 @@ pub fn push_out(terrain: Terrain, p: Vec3, pad: Float) -> Vec3 {
   })
 }
 
-/// The edge of every rock and crevasse as seen from `p`.
+/// The edge of every rock, crevasse and pond as seen from `p`.
 fn edges(terrain: Terrain, p: Vec3) -> List(#(Float, Vec3)) {
-  list.append(
+  list.flatten([
     list.map(terrain.rocks, edge(_, p)),
     list.map(terrain.crevasses, crevasse_edge(_, p)),
-  )
+    list.map(terrain.ponds, pond_edge(_, p)),
+  ])
+}
+
+/// How far `p` is outside the pond (negative inside), and the way out.
+fn pond_edge(pond: Pond, p: Vec3) -> #(Float, Vec3) {
+  let away = vec3.flat(vec3.subtract(p, pond.center))
+  #(vec3.length(away) -. pond.radius, outward(away))
+}
+
+/// True when `p` is over the water of a pond.
+pub fn in_pond(terrain: Terrain, p: Vec3) -> Bool {
+  list.any(terrain.ponds, fn(pond) { pond_edge(pond, p).0 <. 0.0 })
 }
 
 /// The part of a rock or hill that blocks a walker: a circle of the first

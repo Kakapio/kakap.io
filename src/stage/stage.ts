@@ -2,9 +2,12 @@ import { Pointer, runLoop } from "../tank/canvas";
 import { Camera, type V3 } from "./camera";
 import { crevasseLayers } from "./crevasse-draw";
 import { DebugDraw } from "./debug-draw";
+import { foodLayers, Sprouts } from "./food-draw";
 import { Ground } from "./ground";
 import { Boil, line } from "./ink";
 import { houseLayers } from "./house-draw";
+import { pondLayers } from "./pond-draw";
+import * as fishes from "./pond-sim";
 import { Emotes, rabbitLayers } from "./rabbit-draw";
 import * as bunnies from "./rabbit-sim";
 import { rockLayers } from "./rock-draw";
@@ -19,6 +22,7 @@ import {
   heightAt,
   type Land,
   pick,
+  POND_RADIUS,
   rockUnder,
   scatterRocks,
 } from "./terrain-sim";
@@ -68,6 +72,21 @@ const BOULDER_SPOTS = [
   { u: 0.5, v: 0.93 },
 ];
 
+/** Centers for the pond, as fractions of the screen width and height, in order of choice. */
+const POND_SPOTS = [
+  { u: 0.46, v: 0.5 },
+  { u: 0.6, v: 0.42 },
+  { u: 0.36, v: 0.46 },
+  { u: 0.52, v: 0.64 },
+  { u: 0.7, v: 0.7 },
+  { u: 0.5, v: 0.78 },
+];
+
+const FISH_COUNT = 4;
+
+/** A spider's foot this close to the ground is in the water of a pond it stands over. */
+const WADE_HEIGHT = 8;
+
 /** One spider in the scene, with its own settings and target. */
 type Walker = {
   settings: sim.SpiderSettings;
@@ -82,7 +101,8 @@ type Walker = {
 
 /**
  * The 2.5D scene: a camera over the ground, the scenery, a herd of rabbits,
- * and one or more spiders. The first spider walks to the spot under the
+ * a pond of koi, patches of food, and one or more spiders. The first
+ * spider walks to the spot under the
  * pointer, marked by a ring on the ground. A click pins the spot, and the
  * spider stays on it. A click on the pin removes it. With no pointer and no
  * pin, the spiders wander between waypoints, and take turns to stalk the
@@ -104,6 +124,9 @@ export class Stage {
   private readonly ground = new Ground();
   private land: Land = scatterRocks();
   private readonly emotes = new Emotes();
+  private readonly sprouts = new Sprouts();
+  private garden = bunnies.NO_FOOD;
+  private school: fishes.School = [];
   private readonly debugDraw = new DebugDraw();
   private readonly spiders: Walker[];
   private rabbitCfg = bunnies.config(bunnies.DEFAULT_RABBITS);
@@ -194,16 +217,25 @@ export class Stage {
     });
     const threats = this.spiders.map((s) => s.view.body);
     const doors = this.land.houses.map((h) => h.door);
-    this.paths = bunnies.updatePaths(this.paths, this.herd, dt);
-    this.herd = bunnies.step(this.herd, this.land.ground, threats, doors, this.paths, this.bounds, dt, this.rabbitCfg);
+    this.paths = bunnies.foodPaths(bunnies.updatePaths(this.paths, this.herd, dt), this.garden);
+    this.herd = bunnies.step(this.herd, this.land.ground, threats, doors, this.garden, this.paths, this.bounds, dt, this.rabbitCfg);
+    this.garden = bunnies.tend(this.garden, this.herd, this.land.ground, doors, this.paths, this.bounds, dt);
+    // The fish feel every spider foot that is down in their water.
+    const wading = this.spiders.flatMap((s) => s.view.legs.map((l) => l.foot).filter((f) => f.y < WADE_HEIGHT));
+    const water = this.land.ponds[0];
+    if (water) this.school = fishes.step(this.school, water, wading, time, dt);
     this.boil.tick(time);
     const rabbits = bunnies.view(this.herd, this.rabbitCfg);
     this.emotes.update(rabbits, time);
+    const food = bunnies.patches(this.garden);
+    this.sprouts.update(food, time);
 
     const ctx = this.ctx;
     this.ground.drawBase(ctx, cam);
     const layers = [
+      pondLayers(ctx, cam, this.land.ponds, fishes.view(this.school), wading, time, this.boil),
       crevasseLayers(ctx, cam, this.land.crevasses, this.boil),
+      foodLayers(ctx, cam, food, this.sprouts, time, this.boil),
       this.markLayers(time),
       rockLayers(ctx, cam, this.land.rocks, this.boil),
       houseLayers(ctx, cam, this.land.houses, this.occupants(rabbits), time, this.boil),
@@ -268,7 +300,12 @@ export class Stage {
     this.bounds = this.visibleBounds();
     const homes = HOUSE_SPOTS.map((spot) => this.houseSpot(spot.u, spot.v));
     const crevasse = this.crevasseSpot(homes);
-    this.land = scatterRocks((r) => !this.covers(r), homes, crevasse, this.boulderSpot(homes, crevasse));
+    const boulder = this.boulderSpot(homes, crevasse);
+    this.land = scatterRocks((r) => !this.covers(r), homes, crevasse, boulder, this.pondSpot(homes, crevasse, boulder));
+    const water = this.land.ponds[0];
+    this.school = water ? fishes.stock(water, FISH_COUNT) : [];
+    // The old patches may now be under a rock or off the screen.
+    this.garden = bunnies.NO_FOOD;
     this.paths = bunnies.findPaths(
       this.land.ground,
       this.land.houses.map((h) => h.door),
@@ -336,6 +373,28 @@ export class Stage {
         this.isOpen(at, BOULDER_RADIUS, homes) &&
         !this.covers({ center: at, radius: BOULDER_RADIUS, height: 0 }) &&
         (!crevasse || distanceToLine(at, crevasse.from, crevasse.to) > BOULDER_RADIUS + CREVASSE_WIDTH / 2 + 40);
+      if (clear) return at;
+    }
+    return null;
+  }
+
+  /** The first pond spot that is on screen and clear of the page text, the houses, the nest, the crevasse and the boulder. */
+  private pondSpot(homes: V3[], crevasse: CrevasseSpot | null, boulder: V3 | null): V3 | null {
+    const cam = this.camera;
+    for (const spot of POND_SPOTS) {
+      const at = this.groundAt(spot);
+      const edges = [
+        { ...at, x: at.x - POND_RADIUS },
+        { ...at, x: at.x + POND_RADIUS },
+        { ...at, z: at.z - POND_RADIUS },
+        { ...at, z: at.z + POND_RADIUS },
+      ].map((p) => cam.project(p));
+      const clear =
+        edges.every((p) => p.x > 0 && p.x < cam.width && p.y > 0 && p.y < cam.height) &&
+        this.isOpen(at, POND_RADIUS, homes) &&
+        !this.covers({ center: at, radius: POND_RADIUS, height: 0 }) &&
+        (!crevasse || distanceToLine(at, crevasse.from, crevasse.to) > POND_RADIUS + CREVASSE_WIDTH / 2 + 50) &&
+        (!boulder || Math.hypot(at.x - boulder.x, at.z - boulder.z) > POND_RADIUS + BOULDER_RADIUS + 50);
       if (clear) return at;
     }
     return null;
@@ -437,7 +496,8 @@ export class Stage {
       grid: ways.grid,
       field: fields[this.debugWay] ?? null,
       rabbits,
-      aims: bunnies.aims(this.herd, doors, this.paths),
+      aims: bunnies.aims(this.herd, doors, this.garden, this.paths),
+      food: bunnies.patches(this.garden),
       huddle: bunnies.outsideCentroid(this.herd),
       spacing: bunnies.DEFAULT_RABBITS.spacing,
       huddleRadius: bunnies.DEFAULT_RABBITS.huddleRadius,
