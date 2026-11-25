@@ -19,16 +19,16 @@ const TUNICS = [
 /** `size` scales the whole rabbit; 1 is average height. */
 type Look = { name?: string; tunic: string; fur: string; furShade: string; size: number };
 
-/** Named rabbits by id. The rest of the herd (ids 4 and 5) stays anonymous. */
+/** Named rabbits by id. Every rabbit in the herd has a name. */
 const NAMED: Record<number, Partial<Look>> = {
   0: { name: "Steph", tunic: "#d27896", fur: "#ecd58a", furShade: "#cdb269" },
   1: { name: "Alex" },
   2: { name: "Rishi", fur: "#9a6b45", furShade: "#7a5234" },
   3: { name: "Max", tunic: "#7d8084" },
-  6: { name: "Ethan", fur: "#9be3f0", furShade: "#72c3d4", size: 0.85 },
-  7: { name: "Ashkan", tunic: "#7a5a3a", fur: "#7fc46a", furShade: "#5f9f4d" },
-  8: { name: "Matthew", tunic: "#3f4a5a", fur: "#ffe23a", furShade: "#dcbd1e" },
-  9: { name: "Sam", tunic: "#6b5a2e", fur: "#2f5fa8", furShade: "#234a86" },
+  4: { name: "Ethan", tunic: "#7a5a3a", fur: "#9be3f0", furShade: "#72c3d4", size: 0.85 },
+  5: { name: "Ashkan", tunic: "#7a5a3a", fur: "#7fc46a", furShade: "#5f9f4d" },
+  6: { name: "Matthew", tunic: "#3f4a5a", fur: "#ffe23a", furShade: "#dcbd1e" },
+  7: { name: "Sam", tunic: "#6b5a2e", fur: "#2f5fa8", furShade: "#234a86" },
 };
 
 function lookOf(id: number): Look {
